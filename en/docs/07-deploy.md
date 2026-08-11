@@ -42,8 +42,13 @@ Config essentials (see [VARIABLES.md](../VARIABLES.md)):
 - `NCCL_IB_HCA` / `NCCL_SOCKET_IFNAME`: fill per the **head's actual cabled port**;
   `WORKER_NCCL_*` per the worker's actual port (the two may differ; here head=Port0 / worker=Port1)
 - GID index: leave empty; the start script auto-resolves from sysfs (`NCCL_IB_GID_AUTO=1`)
-- `DSPARK_MODEL=/cache/huggingface/models/DeepSeek-V4-Flash-0731` (local path, no HF hub)
+- `ABLITERATED=0` (official 0731 checkpoint; `1` = Keys abliterated variant)
+- `DSPARK_MODEL_OFFICIAL=/cache/huggingface/models/DeepSeek-V4-Flash-0731` (local path, no HF hub;
+  **the new start script resolves `DSPARK_MODEL` from `DSPARK_MODEL_OFFICIAL` — do not set `DSPARK_MODEL` directly**)
 - `DSPARK_ENCODING_FILE=.../encoding/encoding_dsv4.py` (installed into vLLM at container start)
+- `DSPARK_REVISION`: leave empty (script auto-pins tested `9e165c30…` when unset, Issue #19; local-path models unaffected)
+- `ENABLE_VL_SIDECAR=0` (text-only; `1` enables the experimental VL sidecar path and switches to `GPU_MEMORY_UTILIZATION_VISION`)
+- `GPU_MEMORY_UTILIZATION_TEXT=0.835` (text-only GPU utilization, replaces legacy `GPU_MEMORY_UTILIZATION`)
 - `DEFAULT_THINKING=max` (set to `low`/`off` before benchmarking, see chapter 08)
 
 ## 7.3 Preflight

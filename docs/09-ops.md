@@ -81,12 +81,50 @@ sudo sysctl -w vm.compaction_proactiveness=0
 | ghcr 镜像拉不动 | blob CDN 被限速 | 用 ghcr.nju.edu.cn 镜像 + digest 校验 |
 | 服务起不来 / 端口占用 | 上次未正常停止 | `./stop-deepseek-v4-flash-dspark.sh` 后重试 |
 | 单请求输出数万 token 不停 | `DEFAULT_THINKING=max` + 开放提示词 | 请求加 `thinking:false`；压测改 `low/off` |
+| 600K+ 上下文 decode 慢（~1 tok/s） | 旧版本 Issue #22：`nvfp4_ds_mla` 走了慢速 bf16 kernel | 升级到 94baabf（start 自动应用 hotfix）；验证 `flashmla_sparse.py:880` 为 `in ("fp8_ds_mla", "nvfp4_ds_mla")` |
+| 多轮 tool call 历史被污染 | 旧版 Issue #21：encoding 对 dict arguments 误 `json.loads` | 94baabf 自动应用 `hotfix-encoding-dsv4-issue21.py`；日志见 `[OK] Issue #21 patch applied` |
 | 高并发下内存涨 | vLLM prefix-cache 老版本泄漏 | 使用 Anemll 0.1.1 镜像（已修复） |
 | SSH 断连后下载中断 | 进程挂在会话上 | 一律 `nohup setsid` + `@reboot` 自恢复 |
 
 ## 9.5 升级与回滚
 
+### 升级到 94baabf（2026-08-11 实测）
+
+> 本手册对应 MiaAI 部署仓库 **94baabf**（text-only 0731 默认）。旧版（≤ `a4ce87a`）
+> 升级步骤如下，已实测通过。
+
+```bash
+cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark   # head 上
+# 1) 丢弃本地对 compose 的手工修改（如不再需要）
+git checkout -- docker-compose.dspark.yml
+git pull origin main                          # a4ce87a..94baabf（7 commits）
+# 2) .env 迁移（新版变量约定）：
+#    - DSPARK_MODEL=…        → 删掉，改设 DSPARK_MODEL_OFFICIAL=…（同路径）
+#    - GPU_MEMORY_UTILIZATION → 删掉，改设 GPU_MEMORY_UTILIZATION_TEXT=0.835
+#    - 新增 ABLITERATED=0、ENABLE_VL_SIDECAR=0
+#    - DSPARK_REVISION 留空即可（自动 pin；本地路径模型不受影响）
+# 3) 完整重启（start 自动同步 worker 并应用 Issue #22/#21 hotfix）
+./stop-deepseek-v4-flash-dspark.sh
+./start-deepseek-v4-flash-dspark.sh
+```
+
+升级内容摘要（`a4ce87a` → `94baabf`，7 commits）：
+
+| 提交 | 内容 | 影响 |
+|---|---|---|
+| `6c42a7a` | **Issue #22**：`nvfp4_ds_mla` 长上下文解码回归修复（600K+ 时 16x 减速） | ⭐ 核心：start 自动 hotfix，长上下文 decode 恢复 70+ tok/s |
+| `e4e8368` | MoonViT 原生视觉多图（后随 94baabf 删除） | 无 |
+| `4dceb4c`/`d084c94`/`50d8f57` | VL sidecar 视觉实验路径 + MCP | 默认关闭（`ENABLE_VL_SIDECAR=0`） |
+| `801db32` | `ABLITERATED` 开关 + text/vision profile 拆分 | `.env` 迁移：`GPU_MEMORY_UTILIZATION_TEXT`/`_VISION` |
+| `94baabf` | **text-only 0731 默认**；Issue #21 encoding 修复；Issue #19 revision pin | 删除 MoonViT 视觉整条线（~11,700 行）；KV 池随 util 0.835 升至 ≈230 万 token |
+
+实测效果：620K/780K 上下文 decode 70–73 tok/s（见 08 章 §8.7）；KV 池 17.02+16.64 GiB。
+
+> ⚠️ 旧版曾以 base64 内嵌方式自研过 toolcall-guard 补丁（chat_utils.py 畸形 JSON 容错）。
+> 升级时已整体丢弃——官方 Issue #21 hotfix 覆盖同类问题，且 94baabf 的 compose 不再含该段。
+
 - 换镜像：改 `.env.dspark` 的 `DSPARK_VLLM_IMAGE` → 双机 `docker pull` → 重启。
-- 换模型版本：重下模型缓存 → 更新 `DSPARK_MODEL` 与 `DSPARK_ENCODING_FILE` → 重启。
+- 换模型版本：重下模型缓存 → 更新 `DSPARK_MODEL_OFFICIAL` 与 `DSPARK_ENCODING_FILE` → 重启。
 - 回滚网络：删除集群会清掉双机 SSH 与网络计划（Sync → Settings → Clusters → Delete），
   网络计划文件：`/etc/netplan/99-nvidia-sync-cluster.yaml`。
+- 回滚部署仓库：`git checkout <旧 commit>` 后恢复旧版 `.env` 变量（`DSPARK_MODEL`、`GPU_MEMORY_UTILIZATION`），再 stop/start。

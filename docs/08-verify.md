@@ -58,13 +58,12 @@ python3 scripts/benchmark-0731.py \
 | prefill | 372 token 提示 ~99 tok/s；短提示可达 ~2000 tok/s |
 | DSpark 投机接受率 | ~91%（平均接受长度 5.5+） |
 | GPU 利用率 | ~95% |
-| KV 池 | 双机 ~183 万 token（1M 上下文下并发 ~1.75×） |
+| KV 池 | 双机 **~230 万 token**（94baabf + `GPU_MEMORY_UTILIZATION_TEXT=0.835` 实测 17.02+16.64 GiB；旧版 0.80 约 183 万） |
 | 高并发聚合（社区，thinking=off） | 最高约 340 tok/s @ c32 |
 
-KV 池是共享的：总在线 token ≤ ~1.83M，长上下文与高并发互斥（详见 [09 章](09-ops.md)）。
+KV 池是共享的：总在线 token ≤ ~2.3M，长上下文与高并发互斥（详见 [09 章](09-ops.md)）。
 
 ## 8.6 实测效果：Agent 长跑 / Vibe Coding 实录
-
 > 在双 DGX Spark 上连续多轮跑 Agent（Vibe Coding 一个双机监控面板 + 长会话对话）之后的真实体验，
 > 附带自建监控面板的实时截图。
 
@@ -92,5 +91,21 @@ KV 池是共享的：总在线 token ≤ ~1.83M，长上下文与高并发互斥
 ![面板截图 3——性能详情](perf/vibe-panel-3.png)
 
 > 截图来自实际运行中的环境；各页详情与重新生成方法见监控面板仓库的 README/PREVIEWS。
+
+## 8.7 长上下文验证（Issue #22 修复，2026-08-11 实测）
+
+> 94baabf 起，start 脚本自动应用 Issue #22 hotfix：`nvfp4_ds_mla` 在 600K+ 上下文时不再走
+> 慢速 bf16 kernel（~1.0 tok/s），改走快速 fp8 kernel。验证方法：`/tokenize` 校准 prompt 到目标
+> 长度后流式请求，测 TTFT 与 decode tok/s（脚本见 `scripts/longctx-verify.py`）。
+
+| 测试 | prompt tokens | TTFT | prefill tok/s | decode tok/s |
+|---|---|---|---|---|
+| 基线（短上下文） | 8,299 | 9.1 s | 908 | **71.6** |
+| 长上下文 #1 | 620,107 | 502.9 s（冷启动） | 1,233 | **73.0** |
+| 长上下文 #2 | 780,109 | 201.8 s（热态） | 3,867 | **70.2** |
+
+**结论**：>600K 上下文 decode 稳定在 70–73 tok/s，与短上下文基线一致，确认修复有效
+（修复前同场景 ~1.0 tok/s，16 倍减速）。首次请求 TTFT 偏长是 FlashInfer autotune 缓存加载
++ GPU 预热，后续即热态。
 
 

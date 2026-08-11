@@ -61,13 +61,30 @@ Measured on this setup (DSpark MTP5, NVFP4 DS-MLA, TP=2):
 | Prefill | ~99 tok/s at 372-token prompt; up to ~2000 tok/s on short prompts |
 | DSpark acceptance | ~91% (mean acceptance length 5.5+) |
 | GPU utilization | ~95% |
-| KV pool | ~1.83M tokens across 2 nodes (~1.75× at 1M context) |
+| KV pool | ~2.3M tokens across 2 nodes (measured 17.02+16.64 GiB at `GPU_MEMORY_UTILIZATION_TEXT=0.835`; legacy 0.80 was ~1.83M) |
 | High-concurrency aggregate (community, thinking=off) | up to ~340 tok/s @ c32 |
 
-The KV pool is shared: total live tokens ≤ ~1.83M, so long context and high concurrency trade off
+The KV pool is shared: total live tokens ≤ ~2.3M, so long context and high concurrency trade off
 against each other (details in [chapter 09](09-ops.md)).
 
 ## 8.6 Real-world Results: Long Agent / Vibe-Coding Runs
+
+## 8.7 Long-context verification (Issue #22 fix, measured 2026-08-11)
+
+> Since 94baabf, the start script auto-applies the Issue #22 hotfix so `nvfp4_ds_mla` no longer
+> dispatches to the slow bf16 kernel (~1.0 tok/s) above 600K context but to the fast fp8 kernel.
+> Method: calibrate a prompt via `/tokenize`, stream a request, measure TTFT and decode tok/s
+> (script: `scripts/longctx-verify.py`).
+
+| Test | prompt tokens | TTFT | prefill tok/s | decode tok/s |
+|---|---|---|---|---|
+| Baseline (short) | 8,299 | 9.1 s | 908 | **71.6** |
+| Long #1 | 620,107 | 502.9 s (cold) | 1,233 | **73.0** |
+| Long #2 | 780,109 | 201.8 s (warm) | 3,867 | **70.2** |
+
+**Conclusion**: decode stays at 70–73 tok/s above 600K tokens, matching the short-context baseline —
+the fix is effective (pre-fix the same scenario was ~1.0 tok/s, a 16× slowdown). First-request TTFT
+includes FlashInfer autotune cache load + GPU warm-up; later requests are warm.
 
 > Hands-on experience from running many consecutive Agent rounds (vibe-coding a dual-node
 > monitoring dashboard plus long-chat sessions) on the dual DGX Spark setup, with live-dashboard

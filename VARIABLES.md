@@ -23,6 +23,13 @@
 | `<HF_MODEL>` | HuggingFace 模型 id | `deepseek-ai/DeepSeek-V4-Flash-0731` |
 | `<HF_MODEL_SHORT>` | 模型 id 的组织名去掉后的短名（用于本地路径） | `DeepSeek-V4-Flash-0731` |
 | `<IMAGE>` | vLLM 运行时镜像 | `ghcr.io/anemll/dspark-vllm-gx10:0.1.1` |
+| `ABLITERATED` | 检查点开关：`0`=官方 0731，`1`=Keys abliterated 变体 | `0`（默认官方） |
+| `DSPARK_MODEL_OFFICIAL` | 官方模型容器内路径（**新版 start 脚本强制从它解析 `DSPARK_MODEL`，不再直接设 `DSPARK_MODEL`**） | `/cache/huggingface/models/DeepSeek-V4-Flash-0731`（本地 156G 目录） |
+| `DSPARK_REVISION` | 官方 HF revision pin（Issue #19）。**未定义**时 start 脚本自动 pin `9e165c30…`；显式空值 = 不 pin。本地路径模型无影响 | 留空即可 |
+| `ENABLE_VL_SIDECAR` | 视觉开关：`0`=text-only（默认，最大 KV），`1`=VL sidecar 实验路径 | `0` |
+| `GPU_MEMORY_UTILIZATION_TEXT` | text-only 显存利用率（新版替代旧 `GPU_MEMORY_UTILIZATION`） | `0.835`（KV 池 ≈230 万 token） |
+| `GPU_MEMORY_UTILIZATION_VISION` | VL sidecar 模式的主模型显存利用率 | `0.80` |
+| `DSPARK_SKIP_HOTFIX` | 设为 `1` 跳过 Issue #22 长上下文 hotfix 自动应用 | 默认 `0`（自动应用） |
 
 ## 常见网络事实（中国大陆环境实测）
 

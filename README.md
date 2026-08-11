@@ -36,7 +36,7 @@
 
 - 模型：`deepseek-ai/DeepSeek-V4-Flash-0731`（官方 0731 GA，I8/FP4 量化，**166.9 GB**，48 分片）
 - 推理引擎：vLLM 0.25.2（`ghcr.io/anemll/dspark-vllm-gx10:0.1.1`），TP=2，DSpark MTP5 投机解码
-- KV cache：`nvfp4_ds_mla`，双机约 **183 万 token** 共享池，`max_model_len=1048576`
+- KV cache：`nvfp4_ds_mla`，双机约 **230 万 token** 共享池（94baabf + util 0.835 实测），`max_model_len=1048576`
 - 实测性能（社区 + 本方案）：单流约 **60–96 tok/s**，热机 decode ~78–80 tok/s，DSpark 接受率 ~91%，
   高并发聚合最高约 340 tok/s（社区数据，需配合 `DEFAULT_THINKING=low/off` 压测）
 - 长跑体验（本方案实测）：Agent/Vibe Coding 连续多轮长跑 **稳定不崩溃**，单会话 **60–70 tok/s**，
@@ -68,7 +68,7 @@
 # 2. 集群：NVIDIA Sync → Cluster Assistant（见 04 章）
 # 3. NCCL：见 05 章
 # 4. 模型：见 06 章（国内网络已适配；海外网络可直接用 hf 官方下载器）
-# 5. 部署：见 07 章 → ./start-deepseek-v4-flash-dspark.sh
+# 5. 部署：见 07 章 → ./start-deepseek-v4-flash-dspark.sh（94baabf：自动应用 Issue #22/#21 hotfix）
 # 6. 验证：curl http://<IP_MGMT_A>:8888/v1/models
 ```
 

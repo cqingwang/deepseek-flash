@@ -38,7 +38,7 @@
 
 - Model: `deepseek-ai/DeepSeek-V4-Flash-0731` (official 0731 GA, I8/FP4 quantized, **166.9 GB**, 48 shards)
 - Engine: vLLM 0.25.2 (`ghcr.io/anemll/dspark-vllm-gx10:0.1.1`), TP=2, DSpark MTP5 speculative decoding
-- KV cache: `nvfp4_ds_mla`, shared pool of about **1.83M tokens** across both nodes, `max_model_len=1048576`
+- KV cache: `nvfp4_ds_mla`, shared pool of about **2.3M tokens** across both nodes (94baabf + util 0.835, measured), `max_model_len=1048576`
 - Measured performance (community + this setup): single stream about 60–96 tok/s, warm decode ~78–80 tok/s,
   DSpark acceptance ~91%, up to ~340 tok/s aggregate at high concurrency (community data, benchmark with
   `DEFAULT_THINKING=low/off`)
