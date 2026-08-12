@@ -85,6 +85,19 @@ class ContainerStateTests(unittest.TestCase):
         self.assertEqual(program.cmd_start(self.k, {}, []), 0)
         dotask.assert_not_called()
 
+    @mock.patch("program.dotask")
+    @mock.patch("program.container_running_remote", return_value=False)
+    @mock.patch("program.container_exists_local", return_value=False)
+    @mock.patch("program.api_healthy", return_value=False)
+    @mock.patch("program.os.access", return_value=True)
+    @mock.patch("program.node_role", return_value="head")
+    def test_start_streams_upstream_diagnostics(
+        self, _role, _executable, _healthy, _head_exists, _worker_running, dotask
+    ):
+        self.assertEqual(program.cmd_start(self.k, {}, []), 0)
+        self.assertEqual(dotask.call_args.kwargs["stdout"], None)
+        self.assertEqual(dotask.call_args.kwargs["stderr"], None)
+
     @mock.patch("program.api_healthy")
     @mock.patch("program.logtask")
     @mock.patch("program.os.access", return_value=False)

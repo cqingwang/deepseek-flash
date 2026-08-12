@@ -380,7 +380,12 @@ def cmd_start(consts, cfg, rest):
         compose_up(consts, env_override)
         return 0 if wait_for_api(consts) else 1
     logtask("start", "启动 DSpark vLLM 服务")
-    dotask(start_script, cwd=consts["runtime_repo"], check=True)
+    try:
+        # 上游脚本包含 GID/SSH/Compose 的现场诊断；必须透传 stdout/stderr，
+        # 否则失败时只剩一个无上下文的 CalledProcessError 退出码。
+        dotask(start_script, cwd=consts["runtime_repo"], stdout=None, stderr=None, check=True)
+    except subprocess.CalledProcessError as exc:
+        logtask("start", f"上游 DSpark 启动脚本失败（exit={exc.returncode}）：{start_script}", level=LogLevel.ERROR)
     return 0
 
 
@@ -391,7 +396,10 @@ def cmd_stop(consts, cfg, rest):
     stop_script = runtime_repo_files(consts)["stop"]
     if not os.access(stop_script, os.X_OK):
         logtask(f"缺少可执行的 {stop_script}", level=LogLevel.ERROR)
-    dotask(stop_script, cwd=consts["runtime_repo"], check=True)
+    try:
+        dotask(stop_script, cwd=consts["runtime_repo"], stdout=None, stderr=None, check=True)
+    except subprocess.CalledProcessError as exc:
+        logtask("stop", f"上游 DSpark 停止脚本失败（exit={exc.returncode}）：{stop_script}", level=LogLevel.ERROR)
     # 兜底：worker 容器若仍存活
     if container_running_remote(consts):
         logtask("stop", "worker 容器仍在，强制停止")
