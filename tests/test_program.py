@@ -220,6 +220,25 @@ class ConfigurationBehaviorTests(unittest.TestCase):
         self.assertTrue(all(path.startswith("/opt/deepseek-flash/dspark/") for path in files.values()))
         self.assertNotIn("/opt/models", files["start"])
 
+    @mock.patch("program.logtask")
+    @mock.patch("program.ssh_task")
+    @mock.patch("program.os.access", return_value=True)
+    @mock.patch("program.os.path.isfile", return_value=True)
+    def test_validate_runtime_repo_checks_worker_before_install(self, _isfile, _access, ssh, logtask):
+        ssh.side_effect = [
+            subprocess.CompletedProcess(["ssh"], 1, stdout="", stderr=""),
+            subprocess.CompletedProcess(["ssh"], 1, stdout="", stderr=""),
+            subprocess.CompletedProcess(["ssh"], 0, stdout="", stderr=""),
+            subprocess.CompletedProcess(["ssh"], 1, stdout="", stderr=""),
+        ]
+        logtask.side_effect = SystemExit(1)
+        with self.assertRaises(SystemExit):
+            program.validate_runtime_repo({
+                "runtime_repo": "/opt/deepseek-flash/dspark",
+                "compose_file": "/opt/deepseek-flash/dspark/docker-compose.dspark.yml",
+            }, "chan@worker")
+        self.assertIn("WORKER 缺少 MiaAI 部署运行时文件", logtask.call_args.args[0])
+
     def test_compose_uses_runtime_repo_as_working_directory(self):
         consts = {
             "project": "deepseek-v4-flash",

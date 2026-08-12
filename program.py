@@ -230,8 +230,8 @@ def model_required_files(model_dir):
     return [os.path.join(model_dir, relative) for relative in required]
 
 
-def validate_runtime_repo(consts):
-    """部署前确认外部 MiaAI runtime repo 已就位，不把模型目录当成部署仓库。"""
+def validate_runtime_repo(consts, worker=None):
+    """部署前确认 head/worker 的 MiaAI runtime repo 均已就位。"""
     files = runtime_repo_files(consts)
     missing = [path for key, path in files.items()
                if (key == "compose" and not os.path.isfile(path)) or
@@ -242,6 +242,24 @@ def validate_runtime_repo(consts):
             f"请按 docs/DOWNLOADS.md 第 9 项下载并固定 a4ce87a2f47f1be8fe64c297a0cf33a9a5e509aa，再将仓库放到 {consts['runtime_repo']}；模型目录 {consts['model_lib']} 只存模型文件。缺少: {missing}",
             level=LogLevel.ERROR,
         )
+    if worker:
+        labels = {"compose": "docker-compose.dspark.yml",
+                  "start": "start-deepseek-v4-flash-dspark.sh",
+                  "stop": "stop-deepseek-v4-flash-dspark.sh"}
+        checks = " && ".join(
+            f"[ {'-f' if key == 'compose' else '-x'} {shlex.quote(path)} ]"
+            for key, path in files.items()
+        )
+        if ssh_task(worker, checks).returncode != 0:
+            remote_missing = []
+            for key, path in files.items():
+                if ssh_task(worker, f"test {'-f' if key == 'compose' else '-x'} {shlex.quote(path)}").returncode != 0:
+                    remote_missing.append(labels[key])
+            logtask(
+                "WORKER 缺少 MiaAI 部署运行时文件",
+                f"请将本机 {consts['runtime_repo']} 同步到 worker 的相同路径 {consts['runtime_repo']}；缺少: {remote_missing}",
+                level=LogLevel.ERROR,
+            )
 
 
 def compose_up(consts, env_override, service=None):
@@ -536,7 +554,10 @@ def install_env(consts, cfg, model_dir):
     logtask("install_env", f"{consts['env_file']} 已生成（模型: {short}）")
     logtask("install_env", "同步 .env.dspark 到 worker")
     scp_task(consts["worker_ssh"], [consts["env_file"]])
-    ssh_task(consts["worker_ssh"], f"cp /tmp/.env.dspark {shlex.quote(consts['env_file'])} && rm -f /tmp/.env.dspark", check=True)
+    remote_env = shlex.quote(consts["env_file"])
+    ssh_task(consts["worker_ssh"],
+             f"sudo install -m 0644 /tmp/.env.dspark {remote_env} && rm -f /tmp/.env.dspark",
+             check=True)
 
 
 def activate_units(consts):
@@ -552,7 +573,7 @@ def cmd_install(consts, cfg, args):
     model_dir = resolve_model(consts, model_arg)
     if not os.path.isfile(f"{model_dir}/config.json"):
         logtask(f"{model_dir}/config.json 不存在（检查模型目录）", level=LogLevel.ERROR)
-    validate_runtime_repo(consts)
+    validate_runtime_repo(consts, consts["worker_ssh"])
     deploy_ops(consts, cfg)
     deploy_units(consts)
     if container_exists_local(consts) or container_exists_remote(consts):
