@@ -4,11 +4,12 @@
 
 ```bash
 cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
-./status-deepseek-v4-flash-dspark.sh   # 双机容器状态
-./logs-deepseek-v4-flash-dspark.sh     # 双机日志
-./smoke-deepseek-v4-flash-dspark.sh    # 冒烟
-./stop-deepseek-v4-flash-dspark.sh     # 停止（先停 head 后停 worker 由脚本处理）
-docker compose --env-file .env.dspark -f docker-compose.dspark.yml ps
+./deploy.sh status                              # 双机容器与 API 状态
+docker compose --env-file /opt/deepseek-flash/.env.dspark \
+  -f /opt/deepseek-flash/docker-compose.dspark.yml logs --tail=200
+./deploy.sh stop                                # 停止（先停 head 后停 worker）
+docker compose --env-file /opt/deepseek-flash/.env.dspark \
+  -f /opt/deepseek-flash/docker-compose.dspark.yml ps
 ```
 
 ## 9.2 开机自恢复（下载类任务）
@@ -27,7 +28,7 @@ chmod +x ~/resume-downloads.sh
 
 ## 9.2b 推理服务开机自启（systemd，推荐）
 
-仅靠 `./start-deepseek-v4-flash-dspark.sh` 手动启动时，**机器重启后服务不会自动恢复**。
+仅靠上游 `start-deepseek-v4-flash-dspark.sh` 手动启动时，**机器重启后服务不会自动恢复**。
 本方案在 head/worker 各装一个 systemd 单元实现开机自启 + 崩溃自愈（单元 ExecStart
 直接调用 `program.py`）：
 
@@ -57,7 +58,7 @@ sudo systemctl status dspark-vllm-head.service
 sudo journalctl -u dspark-vllm-head.service -f
 ```
 
-> `systemctl stop` 会通过 ExecStop 调用 stop 脚本（head+worker 一起停）；
+> `systemctl stop` 会通过 ExecStop 调用 `program.py stop`（head+worker 一起停）；
 > 若想彻底停用自启：`sudo systemctl disable dspark-vllm-head.service`（worker 同理）。
 
 ## 9.3 内核与内存加固
@@ -82,7 +83,7 @@ sudo sysctl -w vm.compaction_proactiveness=0
 | 模型下载 hash-fail | 下载器旧 bug / 脏 sidecar | 用本包脚本（已修复）；删除 `*.chunks.json` 后重下 |
 | 下载速度归零 | 单连接被限速/假死 | 分块下载器自动超时重试；检查网络源（见 06 章） |
 | ghcr 镜像拉不动 | blob CDN 被限速 | 用 ghcr.nju.edu.cn 镜像 + digest 校验 |
-| 服务起不来 / 端口占用 | 上次未正常停止 | `./stop-deepseek-v4-flash-dspark.sh` 后重试 |
+| 服务起不来 / 端口占用 | 上次未正常停止 | `./deploy.sh stop` 后重试 |
 | 单请求输出数万 token 不停 | `DEFAULT_THINKING=max` + 开放提示词 | 请求加 `thinking:false`；压测改 `low/off` |
 | 600K+ 上下文 decode 慢（~1 tok/s） | 旧版本 Issue #22：`nvfp4_ds_mla` 走了慢速 bf16 kernel | 升级到 94baabf（start 自动应用 hotfix）；验证 `flashmla_sparse.py:880` 为 `in ("fp8_ds_mla", "nvfp4_ds_mla")` |
 | 多轮 tool call 历史被污染 | 旧版 Issue #21：encoding 对 dict arguments 误 `json.loads` | 94baabf 自动应用 `hotfix-encoding-dsv4-issue21.py`；日志见 `[OK] Issue #21 patch applied` |

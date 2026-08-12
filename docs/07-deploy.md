@@ -38,8 +38,10 @@ docker image inspect ghcr.io/anemll/dspark-vllm-gx10:0.1.1 --format '{{range .Re
 git clone https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark.git \
   ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
 cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
-cp .env.dspark.example .env.dspark   # 模板在本仓库根目录；替换为 VARIABLES.md 中的 <占位符>
 ```
+
+> `.env.dspark` 由本仓库的 `program.py install` 根据 `config.yaml` 和 `dspark.env.json` 自动生成，
+> 不再手工复制 `.env.dspark.example`；模型下载和双机就位由部署前准备阶段完成。
 
 配置要点（详见 [VARIABLES.md](../VARIABLES.md)）：
 
@@ -59,11 +61,11 @@ cp .env.dspark.example .env.dspark   # 模板在本仓库根目录；替换为 V
 
 ## 7.3 启动前自检
 
-复现包自带 `program.py preflight`（在 head 上经 `./deploy.sh --preflight` 调用）：
+复现包自带 `program.py doctor`（在 head 上经 `./deploy.sh --doctor` 调用）：
 
 ```bash
-./deploy.sh --preflight                # 默认取 config.yaml 的 worker.ssh
-./deploy.sh --preflight <IP_MGMT_B>    # Wi-Fi DHCP 漂移时用参数覆盖 worker 目标
+./deploy.sh --doctor                # 默认取 config.yaml 的 worker.ssh
+./deploy.sh --doctor <IP_MGMT_B>    # Wi-Fi DHCP 漂移时用参数覆盖 worker 目标
 ```
 
 > 检查项全部 `[OK]` 且 `8888 空闲` 才满足部署前置条件；若某项 `[FAIL]` 按提示先修复。
@@ -71,13 +73,13 @@ cp .env.dspark.example .env.dspark   # 模板在本仓库根目录；替换为 V
 ## 7.4 启动服务（head 上执行，worker 先起）
 
 ```bash
-cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
-./start-deepseek-v4-flash-dspark.sh
+cd ~/deepseek-flash
+./deploy.sh --doctor
+./deploy.sh --install
 ```
 
-脚本自动完成：解析 GID → 同步 compose/env/hotfix 到 worker → 双端校验 compose → **先起 worker** →
-起 head → **自动应用 Issue #22 hotfix（nvfp4_ds_mla 长上下文解码修复）并重启双容器** →
-等待 API → 跑一次最小对话验证。
+`install` 自动完成：同步简化部署程序和配置 → 注册双机模型 symlink → 生成并同步 `.env.dspark` →
+**先起 worker** → 起 head → 调用上游 94baabf 的 start 脚本（包含 Issue #22/#21 hotfix）→ 等待 API。
 
 **冷启动约 6–9 分钟**，关键日志：
 

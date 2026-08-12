@@ -22,13 +22,15 @@ curl http://<IP_MGMT_A>:8888/v1/chat/completions \
 
 ## 8.3 仓库自带脚本（Annotation 1：冒烟测试）
 
-仓库提供 `smoke-deepseek-v4-flash-dspark.sh`（并发冒烟）、`status-...`、`logs-...`、`stop-...`：
+当前简化部署入口统一为 `deploy.sh`；上游 compose 的日志和状态仍可直接通过 Docker 查看：
 
 ```bash
 cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
-./smoke-deepseek-v4-flash-dspark.sh          # 默认 6 并发；CONCURRENCY=12 ./smoke-... 可调
-./status-deepseek-v4-flash-dspark.sh
-./logs-deepseek-v4-flash-dspark.sh
+./deploy.sh status
+docker compose --env-file /opt/deepseek-flash/.env.dspark \
+  -f /opt/deepseek-flash/docker-compose.dspark.yml ps
+docker compose --env-file /opt/deepseek-flash/.env.dspark \
+  -f /opt/deepseek-flash/docker-compose.dspark.yml logs --tail=200
 ```
 
 实测结果：**6/6 请求全部成功**。
@@ -107,5 +109,4 @@ KV 池是共享的：总在线 token ≤ ~2.3M，长上下文与高并发互斥�
 **结论**：>600K 上下文 decode 稳定在 70–73 tok/s，与短上下文基线一致，确认修复有效
 （修复前同场景 ~1.0 tok/s，16 倍减速）。首次请求 TTFT 偏长是 FlashInfer autotune 缓存加载
 + GPU 预热，后续即热态。
-
 

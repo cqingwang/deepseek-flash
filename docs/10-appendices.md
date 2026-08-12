@@ -78,7 +78,7 @@
 | `docs/01-hardware.md` … `docs/10-appendices.md` | 分章节教程 |
 | `config.yaml` | 集群参数 SSOT（common/head/worker 分类，program.py 读取） |
 | `deploy.sh` | 统一部署入口（薄层：命令解析 → 转发 program.py） |
-| `program.py` | 唯一实现（install/uninstall/restart/live_check/preflight/start/stop/ensure/status；随部署同步到双机 /etc/dspark-vllm/） |
+| `program.py` | 唯一实现（install/uninstall/restart/live_check/chat_verify/doctor/start/stop/ensure/status/load-config/gen-env/help；随部署同步到双机 /etc/dspark-vllm/） |
 | `dspark.env.json` | .env 参数模板（固定键值 + null 占位变化键，gen-env 派生生产 .env） |
 | `systemd/dspark-vllm-head.service` | head systemd 单元（ExecStart=program.py start / stop，开机自启 + 失败重试） |
 | `systemd/dspark-vllm-worker.service` | worker systemd 单元（ExecStart=program.py ensure，开机自启） |

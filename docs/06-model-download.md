@@ -1,7 +1,7 @@
 # 06 模型下载与完整性（适配受限网络）
 
 > ⚠️ **本仓库已移除下载脚本**：`scripts/dsv4-chunkdl.py` 与 `scripts/resume-downloads.sh` 不再随仓库提供
-> （模型已在 `/opt/models` 平铺就位，无需下载流程）。本章保留作为历史复现参考；
+> （模型已在 `/opt/models/<org>/<model>` 就位，无需下载流程）。本章保留作为历史复现参考；
 > 模型已就位时可跳过本章，直接进入 [07 章](07-deploy.md)。
 
 ## 6.1 事实清单
@@ -79,7 +79,7 @@ ALL_DOWNLOADED
 # head 上执行（脱离会话）
 nohup setsid rsync -a --partial --info=progress2 \
   -e "ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null" \
-  ~/.cache/huggingface/models/ <USER>@<IP_FABRIC_B>:~/.cache/huggingface/models/ \
+  /opt/models/ <USER>@<IP_FABRIC_B>:/opt/models/ \
   > ~/model-rsync.log 2>&1 < /dev/null &
 ```
 

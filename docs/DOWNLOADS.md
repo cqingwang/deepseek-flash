@@ -65,7 +65,7 @@
 | 官方路径 | <https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731>（官方 deepseek-ai 组织，**非门控**） |
 | 国内加速 | `hf-mirror.com`（环境变量 `HF_ENDPOINT=https://hf-mirror.com`） |
 | 大小 | **166.9 GB**，74 个文件 / 48 个 safetensors 分片 |
-| 放哪 | head：`$HOME/.cache/huggingface/models/DeepSeek-V4-Flash-0731/`；worker 由 200G 内网 rsync |
+| 放哪 | head：`/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731/`（`<org>/<model>` 布局，模型库根 `/opt/models`）；worker 由 200G 内网 rsync 到同路径 |
 | 校验 | 官方 LFS sha256 清单 74/74 全量通过（见 06 章），双机一致 |
 | 注意 | 不要用官方 HF 下载器直连（中国网络不通/极慢）；原仓库自带 `scripts/dsv4-chunkdl.py`（已随本次改造移除） |
 
