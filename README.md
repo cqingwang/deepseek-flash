@@ -68,7 +68,7 @@
 # 2. 集群：NVIDIA Sync → Cluster Assistant（见 04 章）
 # 3. NCCL：见 05 章
 # 4. 模型：见 06 章（国内网络已适配；海外网络可直接用 hf 官方下载器）
-# 5. 部署：见 07 章 → ./start-deepseek-v4-flash-dspark.sh（94baabf：自动应用 Issue #22/#21 hotfix）
+# 5. 部署：见 07 章 → ./deploy.sh --doctor && ./deploy.sh --install（模型需预先在双机就位）
 # 6. 验证：curl http://<IP_MGMT_A>:8888/v1/models
 ```
 
@@ -80,7 +80,7 @@
 ./deploy.sh --restart             # 重启集群（= stop + start）
 ./deploy.sh --live_check          # API 健康检查
 ./deploy.sh --chat_verify [tokens]  # 长上下文解码性能验证（Issue #22，默认 620000）
-./deploy.sh --doctor [worker]     # 双机环境自检（原 --preflight；SSH/GPU/CUDA/镜像/模型/RoCE/端口，FAIL=0 才可部署）
+./deploy.sh --doctor [worker]     # 双机环境自检（SSH/GPU/CUDA/镜像/模型/RoCE/端口，FAIL=0 才可部署）
 ./deploy.sh --help                # 帮助
 ```
 

@@ -48,6 +48,9 @@ def dotask(cmd, args=None, check=False, capture_output=True, text=True, shell=Fa
     shell=True 时 cmd 整体交由 /bin/sh（支持管道/重定向），此时忽略 args。
     """
     argv = cmd if shell else shlex.split(cmd) + list(args or [])
+    # subprocess.run 禁止 capture_output 与 stdout/stderr 同时传入。
+    if "stdout" in kwargs or "stderr" in kwargs:
+        capture_output = False
     return subprocess.run(argv, check=check, capture_output=capture_output, text=text,
                           shell=shell, **kwargs)
 
@@ -151,14 +154,22 @@ def api_healthy(consts):
         return False
 
 
-def wait_for_api(consts, attempts=240, sec=5):
+def wait_for_api(consts, attempts=240, sec=5, timeout=None):
     """轮询等待 API 就绪（冷启动最长约 20 分钟）；超时返回 False。"""
-    logtask("wait_for_api", f"等待 vLLM API（最长 {attempts}x{sec}s）")
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    description = f"最长 {timeout}s" if timeout is not None else f"最长 {attempts}x{sec}s"
+    logtask("wait_for_api", f"等待 vLLM API（{description}）")
     for _ in range(attempts):
         if api_healthy(consts):
             logtask("wait_for_api", "API 已健康")
             return True
-        time.sleep(sec)
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(sec, remaining))
+        else:
+            time.sleep(sec)
     logtask("wait_for_api", "超时，将由 systemd 重试", level=LogLevel.WARN)
     return False
 
@@ -186,7 +197,7 @@ def container_exists_remote(consts):
 
 
 def container_running_remote(consts):
-    """远端运行中的容器查询；停止容器不能满足 head 恢复条件。"""
+    """查询远端运行中的容器；停止容器不能满足恢复条件。"""
     r = ssh_task(consts["worker_ssh"],
                 f"docker ps --format '{{{{.Names}}}}' 2>/dev/null | grep -qx {shlex.quote(consts['container'])}")
     return r.returncode == 0
@@ -199,17 +210,10 @@ def compose_up(consts, env_override, service=None):
     env.pop("HEADLESS", None)
     env.update(env_override)
     env["COMPOSE_DISABLE_ENV_FILE"] = "1"
-    dotask("docker compose up -d",
+    dotask("docker compose",
            ["-p", consts["project"], "--env-file", consts["env_file"],
-            "-f", consts["compose_file"]] + ([service] if service else []),
+            "-f", consts["compose_file"], "up", "-d"] + ([service] if service else []),
            cwd=consts["repo"], env=env, check=True)
-
-
-def ensure_worker(consts):
-    """head 触发 worker 容器守护（远端 program.py ensure）。"""
-    logtask("ensure_worker", f"worker({consts['worker_ssh']}) 确保容器在")
-    ssh_task(consts["worker_ssh"],
-            f"sudo {consts['program_remote']} --config {consts['config_remote']} ensure", check=True)
 
 
 # ---- 生产 .env 生成（main 分支最终参数全集，60+ 键） ----
@@ -275,18 +279,17 @@ def cmd_start(consts, cfg, rest):
     if node_role(consts) != "head":
         logtask(f"start 只能在 head({consts['head_hostname']}) 上执行", level=LogLevel.ERROR)
     logtask("start", f"启动集群（worker 先起，head 后起；冷启动最长约 20 分钟）；repo={consts['repo']} api={consts['api_url']}")
-    start_script = f"{consts['repo']}/start-deepseek-v4-flash-dspark.sh"
-    if not os.access(start_script, os.X_OK):
-        logtask(f"缺少可执行的 {start_script}", level=LogLevel.ERROR)
     if api_healthy(consts):
         logtask("start", "API 已健康，跳过")
         return 0
-    ensure_worker(consts)
+    start_script = f"{consts['repo']}/start-deepseek-v4-flash-dspark.sh"
     # head 容器缺失但 worker 已在：compose 拉起 head 并等待（上游 start 在 worker 已在时拒绝执行）
     if not container_exists_local(consts) and container_running_remote(consts):
         logtask("start", "worker 容器在、head 缺失：compose 拉起 head")
         compose_up(consts, {"NODE_RANK": "0", "HEADLESS": ""})
         return 0 if wait_for_api(consts) else 1
+    if not os.access(start_script, os.X_OK):
+        logtask(f"缺少可执行的 {start_script}", level=LogLevel.ERROR)
     logtask("start", "启动 DSpark vLLM 服务")
     dotask(start_script, cwd=consts["repo"], check=True)
     return 0
@@ -303,8 +306,10 @@ def cmd_stop(consts, cfg, rest):
             logtask("stop", "stop 脚本返回非 0（可能无容器），继续清理", level=LogLevel.WARN)
     else:
         logtask("stop", "缺少 stop 脚本，直接按容器操作", level=LogLevel.WARN)
+        if container_running_local(consts):
+            dotask("docker stop", [consts["container"]], check=False)
     # 兜底：worker 容器若仍存活
-    if container_exists_remote(consts):
+    if container_running_remote(consts):
         logtask("stop", "worker 容器仍在，强制停止")
         ssh_task(consts["worker_ssh"],
                 f"cd {shlex.quote(consts['repo'])} && "
@@ -396,17 +401,34 @@ def deploy_units(consts):
 
 def resolve_model(consts, model_arg):
     """解析模型绝对路径：/opt/models/<org>/<model> 或 <org>/<model> 自动补前缀；缺省用 common.default_model。"""
-    if model_arg:
-        arg = model_arg.rstrip("/")
-        if arg.startswith("/opt/models/"):
-            return arg
-        if arg.startswith("/"):
-            logtask(f"模型路径需位于 {consts['model_lib']} 下: {model_arg}", level=LogLevel.ERROR)
-        return f"{consts['model_lib']}/{arg}"
-    model_dir = consts["default_model"]
-    if not model_dir.startswith("/opt/models/"):
-        model_dir = f"/opt/models/{model_dir.lstrip('/')}"
+    root = os.path.abspath(consts["model_lib"])
+    candidate = model_arg or consts["default_model"]
+    if not candidate:
+        logtask("未配置模型路径", level=LogLevel.ERROR)
+    if not os.path.isabs(candidate):
+        candidate = os.path.join(root, candidate)
+    model_dir = os.path.abspath(candidate.rstrip("/"))
+    try:
+        inside_root = os.path.commonpath([root, model_dir]) == root
+    except ValueError:
+        inside_root = False
+    if not inside_root or model_dir == root:
+        logtask(f"模型路径需位于 {root} 下: {candidate}", level=LogLevel.ERROR)
     return model_dir
+
+
+def installed_model_name(consts):
+    """读取 install 生成的服务名，避免切换模型后验证仍请求默认模型。"""
+    try:
+        with open(consts["env_file"], encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("SERVED_MODEL_NAME="):
+                    value = line.partition("=")[2].strip()
+                    if value:
+                        return value
+    except OSError:
+        pass
+    return os.path.basename(consts["default_model"].rstrip("/")).lower()
 
 
 def link_model(consts, model_dir):
@@ -451,9 +473,19 @@ def install_env(consts, cfg, model_dir):
     ssh_task(consts["worker_ssh"], f"cp /tmp/.env.dspark {shlex.quote(consts['env_file'])} && rm -f /tmp/.env.dspark", check=True)
 
 
+def activate_units(consts):
+    """让 install 后的 systemd 单元进入 active 状态，确保后续 stop/Restart 生效。"""
+    logtask("activate_units", "启动 worker/head systemd 单元并保持自恢复状态")
+    ssh_task(consts["worker_ssh"], "sudo systemctl start dspark-vllm-worker.service", check=True)
+    dotask("sudo systemctl start dspark-vllm-head.service", check=True)
+
+
 def cmd_install(consts, cfg, args):
     model_arg = args.model
     logtask("install", f"安装/覆盖安装：部署 program.py+config 到双机、装 systemd 单元、注册模型、生成生产 .env、启动并等待 API；model={model_arg or consts['default_model']} config={consts['config_local']}")
+    model_dir = resolve_model(consts, model_arg)
+    if not os.path.isfile(f"{model_dir}/config.json"):
+        logtask(f"{model_dir}/config.json 不存在（检查模型目录）", level=LogLevel.ERROR)
     deploy_ops(consts, cfg)
     deploy_units(consts)
     if container_exists_local(consts) or container_exists_remote(consts):
@@ -461,7 +493,6 @@ def cmd_install(consts, cfg, args):
         cmd_stop(consts, [])
     else:
         logtask("install", "未检测到现存容器，直接安装")
-    model_dir = resolve_model(consts, model_arg)
     short = os.path.basename(model_dir.rstrip("/"))
     logtask("install", f"模型: {model_dir} (served: {short.lower()})")
     link_model(consts, model_dir)
@@ -469,6 +500,7 @@ def cmd_install(consts, cfg, args):
     cmd_start(consts, [])
     if not wait_for_api(consts):
         logtask("install 完成但 API 未就绪", level=LogLevel.ERROR)
+    activate_units(consts)
     logtask("install", "完成")
     return 0
 
@@ -502,7 +534,7 @@ def cmd_live_check(consts, cfg, args):
     wait = args.wait or 0
     logtask("live_check", f"API 健康检查；api={consts['api_url']} wait={wait or '一次'}")
     if wait > 0:
-        return 0 if wait_for_api(consts, attempts=max(1, wait // 5), sec=5) else 1
+        return 0 if wait_for_api(consts, attempts=max(1, wait), sec=1, timeout=wait) else 1
     if api_healthy(consts):
         logtask("live_check", f"OK: {consts['api_url']}")
         return 0
@@ -519,7 +551,7 @@ def cmd_chat_verify(consts, cfg, args):
     import urllib.request
 
     base = consts["api_url"][: consts["api_url"].rfind("/models")]
-    model = os.path.basename(consts["default_model"].rstrip("/")).lower()
+    model = installed_model_name(consts)
     target = args.target
     if target <= 0:
         logtask("chat_verify 的目标 tokens 必须大于 0", level=LogLevel.ERROR)
@@ -585,7 +617,7 @@ def cmd_chat_verify(consts, cfg, args):
     return 0
 
 
-# ---- doctor 命令（head 上；原 repro-preflight.sh） ----
+# ---- doctor 命令（head 上） ----
 
 def doctor_check_node(consts, worker, ok, bad):
     """双机 GPU/CUDA/Docker/sudo 探测（head 本地 / worker 走 SSH）。"""
@@ -623,8 +655,8 @@ def doctor_image(consts, worker, ok, bad):
 
 
 def doctor_model(consts, worker, ok, bad):
-    """双机模型缓存（经 deploy 注册的 symlink 目录，>160GB）。"""
-    model_path = f"{consts['model_links']}/{os.path.basename(consts['default_model'].rstrip('/'))}"
+    """双机模型缓存（检查 config 指向的真实模型目录，install 前也可执行）。"""
+    model_path = consts["default_model"]
     for tag, target in (("HEAD", None), ("WORKER", worker)):
         if target:
             r = ssh_task(target, f"du -sb {shlex.quote(model_path)} 2>/dev/null | cut -f1")
@@ -703,10 +735,11 @@ def cmd_load_config(consts, cfg, args):
 
 def cmd_gen_env(consts, cfg, args):
     """从 config + 模型生成完整 .env.dspark（--output 写文件，缺省 stdout）。"""
-    model_dir = args.model or cfg.get("common", {}).get("default_model", "")
+    model_arg = args.model or cfg.get("common", {}).get("default_model", "")
     output = args.output
-    if not model_dir:
+    if not model_arg:
         return logtask("gen-env 需要 --model <模型绝对路径> 或 config 的 common.default_model", level=LogLevel.ERROR)
+    model_dir = resolve_model(consts, model_arg)
     logtask("gen-env", f"生成完整 .env.dspark（生产 .env 由 install 内部复用本逻辑）；model={model_dir} output={output or 'stdout'}")
     content = gen_env(cfg, model_dir)
     if output:
@@ -730,7 +763,7 @@ def cmd_help(consts=None, cfg=None, rest=None):
   restart                  重启集群（= stop + start）
   live_check [--wait <秒>]  API 健康检查（--wait 轮询）
   chat_verify [目标tokens]  长上下文解码性能验证（Issue #22，默认 620000）
-  doctor [worker目标]       双机环境自检（原 preflight）
+  doctor [worker目标]       双机环境自检
 
 运行支撑（双机本机，systemd 单元直调）:
   start / stop             仅 head（worker 编排顺序）
