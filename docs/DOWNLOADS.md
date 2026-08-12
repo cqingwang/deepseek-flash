@@ -84,7 +84,7 @@
 |---|---|
 | 官方路径 | <https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark>，建议 pin `a4ce87a2f47f1be8fe64c297a0cf33a9a5e509aa`（2026-08-04） |
 | 大小 | 约 10 MB |
-| 放哪 | `$HOME/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark/`（worker 由启动脚本自动同步所需文件） |
+| 放哪 | 本仓库 `dspark/` 子模块；部署到双机 `config.yaml` 的 `common.runtime_repo`（默认 `/opt/deepseek-flash/dspark/`） |
 | 校验 | `git rev-parse HEAD` |
 
 ## 10. 备选 / 可选

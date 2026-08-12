@@ -41,7 +41,7 @@
 | NVIDIA/nccl（tag v2.30.7-1） | GitHub 仓库 | github.com/NVIDIA/nccl | NCCL 编译 | 05 | 引用 |
 | NVIDIA/nccl-tests（pin 717b6831） | GitHub 仓库 | github.com/NVIDIA/nccl-tests | 双机通信测试 | 05 | 引用 |
 | Anemll/dspark-vllm-gx10（镜像 0.1.1） | GitHub 仓库 + 容器镜像 | github.com/Anemll/dspark-vllm-gx10；ghcr.io（国内 ghcr.nju.edu.cn） | vLLM 运行时 | 07 | 引用（含 digest 校验） |
-| MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark（pin a4ce87a2） | GitHub 仓库 | github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark | compose/启动脚本 | 07, 08, 09 | 引用 |
+| MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark（运行时 pin `a4ce87a2f47f1be8fe64c297a0cf33a9a5e509aa`） | GitHub 仓库（本仓库 `dspark/` 子模块） | github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark | compose/启动/停止脚本，部署到 `common.runtime_repo` | 07, 08, 09 | doctor 逐项检查 |
 | MiaAI 早期 recipe（Dual-DGX-Spark-1M-Context） | GitHub 仓库 | github.com/MiaAI-Lab/DeepSeek-V4-Flash-Dual-DGX-Spark-1M-Context | 早期方案（被取代，留档） | 10 | 引用 |
 | elsung/dgx-spark-deepseek-v4-flash | GitHub 仓库 | github.com/elsung/dgx-spark-deepseek-v4-flash | 社区踩坑笔记（GID/Xet/内核崩溃/性能） | 06, 09 | 引用 |
 | aidendle94/sparkrun-vllm-ds4-gb10 | Docker Hub 镜像 | hub.docker.com/r/aidendle94/sparkrun-vllm-ds4-gb10 | 备选镜像家族 | 07 | 引用 |

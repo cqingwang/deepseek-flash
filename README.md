@@ -97,6 +97,10 @@
 前置：模型已在**双机**就位（`/opt/models/<org>/<model>`，各含 `config.json` 与
 `encoding/encoding_dsv4.py`，worker 侧由 200G 内网 rsync 同步）、config.yaml 已按
 [VARIABLES.md](VARIABLES.md) 填好、SSH 免密、运行时镜像已就绪（受限网络用离线包 `docker load`）。
+此外，`common.runtime_repo` 指向的 `dspark/` MiaAI 子项目（按 `docs/DOWNLOADS.md` 固定到
+`a4ce87a2f47f1be8fe64c297a0cf33a9a5e509aa`）必须在**两台机器**存在，至少包含
+`docker-compose.dspark.yml`、`start-deepseek-v4-flash-dspark.sh` 和
+`stop-deepseek-v4-flash-dspark.sh`；这些文件属于部署运行时子项目，不属于模型目录。
 
 ```bash
 ./deploy.sh --doctor                # 双机环境自检：SSH/GPU/CUDA/镜像/模型/RoCE/端口；FAIL=0 才可部署
@@ -171,6 +175,7 @@ dgx-spark-2-deepseek-flash-0731/
 ├── systemd/
 │   ├── dspark-vllm-head.service    # head systemd 单元（ExecStart=program.py start / stop）
 │   └── dspark-vllm-worker.service  # worker systemd 单元（ExecStart=program.py ensure）
+├── dspark/                     # MiaAI DSpark runtime 子模块（compose、start/stop 脚本）
 └── dspark.env.json             # .env.dspark 参数模板（固定键值 + null 占位变化键，gen-env 派生生产 .env）
 ```
 

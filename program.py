@@ -87,9 +87,11 @@ def parser_constants(cfg):
     """从 config 派生集群常量（对应原 deploy.sh 顶部常量块）。"""
     common, head, worker = cfg["common"], cfg["head"], cfg["worker"]
     repo = common["repo"]
+    runtime_repo = common["runtime_repo"]
     return {
         "user": common["user"],
         "repo": repo,
+        "runtime_repo": runtime_repo,
         "project": common["project"],
         "container": common["container"],
         "model_lib": common["model_lib"],
@@ -98,8 +100,8 @@ def parser_constants(cfg):
         "image": common["vllm_image"],
         "image_tar": common.get("image_tar", ""),
         "api_url": common["api_url"],
-        "env_file": f"{repo}/.env.dspark",
-        "compose_file": f"{repo}/docker-compose.dspark.yml",
+        "env_file": f"{runtime_repo}/.env.dspark",
+        "compose_file": f"{runtime_repo}/docker-compose.dspark.yml",
         "head_hostname": head["hostname"],
         "head_fabric_ip": head["fabric_ip"],
         "worker_hostname": worker["hostname"],
@@ -150,7 +152,7 @@ def api_healthy(consts):
         dotask("curl -fsS --max-time 5", [consts["api_url"]],
                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         return True
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, OSError):
         return False
 
 
@@ -203,6 +205,45 @@ def container_running_remote(consts):
     return r.returncode == 0
 
 
+def runtime_repo_files(consts):
+    """返回 MiaAI DSpark 子项目要求的启动、停止和 Compose 文件。"""
+    runtime_repo = consts["runtime_repo"]
+    return {
+        "start": f"{runtime_repo}/start-deepseek-v4-flash-dspark.sh",
+        "stop": f"{runtime_repo}/stop-deepseek-v4-flash-dspark.sh",
+        "compose": consts["compose_file"],
+    }
+
+
+def model_required_files(model_dir):
+    """DOWNLOADS.md 第 7 项要求的模型关键文件与 48 个权重分片。"""
+    required = [
+        "config.json",
+        "configuration.json",
+        "generation_config.json",
+        "model.safetensors.index.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "encoding/encoding_dsv4.py",
+    ]
+    required.extend(f"model-{index:05d}-of-00048.safetensors" for index in range(1, 49))
+    return [os.path.join(model_dir, relative) for relative in required]
+
+
+def validate_runtime_repo(consts):
+    """部署前确认外部 MiaAI runtime repo 已就位，不把模型目录当成部署仓库。"""
+    files = runtime_repo_files(consts)
+    missing = [path for key, path in files.items()
+               if (key == "compose" and not os.path.isfile(path)) or
+               (key != "compose" and not os.access(path, os.X_OK))]
+    if missing:
+        logtask(
+            "缺少 MiaAI 部署运行时文件",
+            f"请按 docs/DOWNLOADS.md 第 9 项下载并固定 a4ce87a2f47f1be8fe64c297a0cf33a9a5e509aa，再将仓库放到 {consts['runtime_repo']}；模型目录 {consts['model_lib']} 只存模型文件。缺少: {missing}",
+            level=LogLevel.ERROR,
+        )
+
+
 def compose_up(consts, env_override, service=None):
     """docker compose 拉起容器（对应原 dspark-vllm.sh 的 compose 段）。"""
     env = dict(os.environ)
@@ -213,7 +254,34 @@ def compose_up(consts, env_override, service=None):
     dotask("docker compose",
            ["-p", consts["project"], "--env-file", consts["env_file"],
             "-f", consts["compose_file"], "up", "-d"] + ([service] if service else []),
-           cwd=consts["repo"], env=env, check=True)
+           cwd=consts["runtime_repo"], env=env, check=True)
+
+
+def recovery_env(consts):
+    """复现 main start wrapper 在 head 恢复路径显式注入的 Compose 环境。"""
+    values = {}
+    try:
+        with open(consts["env_file"], encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key and key.replace("_", "").isalnum():
+                    values[key] = value
+    except OSError:
+        return {}
+    selected = (
+        "WORKER_HOST", "MASTER_ADDR", "MASTER_PORT", "NCCL_IB_HCA",
+        "NCCL_SOCKET_IFNAME", "NCCL_IB_GID_INDEX", "VLLM_HOST", "VLLM_PORT",
+        "VLLM_HOST_IP",
+    )
+    result = {key: values[key] for key in selected if key in values}
+    result.setdefault("VLLM_HOST", "127.0.0.1")
+    result.setdefault("VLLM_PORT", "8888")
+    if result.get("MASTER_ADDR"):
+        result.setdefault("VLLM_HOST_IP", result["MASTER_ADDR"])
+    return result
 
 
 # ---- 生产 .env 生成（main 分支最终参数全集，60+ 键） ----
@@ -278,42 +346,40 @@ def gen_env(cfg, model_dir, template=None):
 def cmd_start(consts, cfg, rest):
     if node_role(consts) != "head":
         logtask(f"start 只能在 head({consts['head_hostname']}) 上执行", level=LogLevel.ERROR)
-    logtask("start", f"启动集群（worker 先起，head 后起；冷启动最长约 20 分钟）；repo={consts['repo']} api={consts['api_url']}")
+    logtask("start", f"启动集群（worker 先起，head 后起；冷启动最长约 20 分钟）；runtime_repo={consts['runtime_repo']} api={consts['api_url']}")
+    files = runtime_repo_files(consts)
+    start_script = files["start"]
+    if not os.access(start_script, os.X_OK):
+        logtask(f"缺少可执行的 {start_script}", level=LogLevel.ERROR)
     if api_healthy(consts):
         logtask("start", "API 已健康，跳过")
         return 0
-    start_script = f"{consts['repo']}/start-deepseek-v4-flash-dspark.sh"
     # head 容器缺失但 worker 已在：compose 拉起 head 并等待（上游 start 在 worker 已在时拒绝执行）
     if not container_exists_local(consts) and container_running_remote(consts):
         logtask("start", "worker 容器在、head 缺失：compose 拉起 head")
-        compose_up(consts, {"NODE_RANK": "0", "HEADLESS": ""})
+        env_override = recovery_env(consts)
+        env_override.update({"NODE_RANK": "0", "HEADLESS": ""})
+        compose_up(consts, env_override)
         return 0 if wait_for_api(consts) else 1
-    if not os.access(start_script, os.X_OK):
-        logtask(f"缺少可执行的 {start_script}", level=LogLevel.ERROR)
     logtask("start", "启动 DSpark vLLM 服务")
-    dotask(start_script, cwd=consts["repo"], check=True)
+    dotask(start_script, cwd=consts["runtime_repo"], check=True)
     return 0
 
 
 def cmd_stop(consts, cfg, rest):
     if node_role(consts) != "head":
         logtask(f"stop 只能在 head({consts['head_hostname']}) 上执行", level=LogLevel.ERROR)
-    logtask("stop", f"停止集群（head 先停，worker 后停；幂等）；repo={consts['repo']}")
-    stop_script = f"{consts['repo']}/stop-deepseek-v4-flash-dspark.sh"
-    if os.access(stop_script, os.X_OK):
-        r = dotask(stop_script, cwd=consts["repo"])
-        if r.returncode != 0:
-            logtask("stop", "stop 脚本返回非 0（可能无容器），继续清理", level=LogLevel.WARN)
-    else:
-        logtask("stop", "缺少 stop 脚本，直接按容器操作", level=LogLevel.WARN)
-        if container_running_local(consts):
-            dotask("docker stop", [consts["container"]], check=False)
+    logtask("stop", f"停止集群（head 先停，worker 后停；幂等）；runtime_repo={consts['runtime_repo']}")
+    stop_script = runtime_repo_files(consts)["stop"]
+    if not os.access(stop_script, os.X_OK):
+        logtask(f"缺少可执行的 {stop_script}", level=LogLevel.ERROR)
+    dotask(stop_script, cwd=consts["runtime_repo"], check=True)
     # 兜底：worker 容器若仍存活
     if container_running_remote(consts):
         logtask("stop", "worker 容器仍在，强制停止")
         ssh_task(consts["worker_ssh"],
-                f"cd {shlex.quote(consts['repo'])} && "
-                f"docker compose -p {shlex.quote(consts['project'])} --env-file .env.dspark -f docker-compose.dspark.yml stop 2>/dev/null || "
+                f"cd {shlex.quote(consts['runtime_repo'])} && "
+                f"docker compose -p {shlex.quote(consts['project'])} --env-file {shlex.quote(consts['env_file'])} -f {shlex.quote(consts['compose_file'])} stop 2>/dev/null || "
                 f"docker stop {shlex.quote(consts['container'])} 2>/dev/null || true")
     logtask("stop", "集群已停止")
     return 0
@@ -322,12 +388,12 @@ def cmd_stop(consts, cfg, rest):
 def cmd_ensure(consts, cfg, rest):
     if node_role(consts) != "worker":
         logtask(f"ensure 只能在 worker({consts['worker_hostname']}) 上执行", level=LogLevel.ERROR)
-    logtask("ensure", f"worker 容器守护（幂等，systemd 开机调用）；container={consts['container']} repo={consts['repo']}")
+    logtask("ensure", f"worker 容器守护（幂等，systemd 开机调用）；container={consts['container']} runtime_repo={consts['runtime_repo']}")
     if container_running_local(consts):
         logtask("ensure", f"worker 容器 {consts['container']} 已在运行")
         return 0
     if not os.path.isfile(consts["compose_file"]) or not os.path.isfile(consts["env_file"]):
-        logtask(f"worker 缺 compose/env: {consts['repo']}", level=LogLevel.ERROR)
+        logtask(f"worker 缺 compose/env: {consts['runtime_repo']}", level=LogLevel.ERROR)
     logtask("ensure", f"启动 worker 容器 {consts['container']}")
     compose_up(consts, {"NODE_RANK": "1", "HEADLESS": "1", "VLLM_HOST_IP": ""}, service="vllm-dspark")
     return 0
@@ -486,6 +552,7 @@ def cmd_install(consts, cfg, args):
     model_dir = resolve_model(consts, model_arg)
     if not os.path.isfile(f"{model_dir}/config.json"):
         logtask(f"{model_dir}/config.json 不存在（检查模型目录）", level=LogLevel.ERROR)
+    validate_runtime_repo(consts)
     deploy_ops(consts, cfg)
     deploy_units(consts)
     if container_exists_local(consts) or container_exists_remote(consts):
@@ -654,11 +721,57 @@ def doctor_image(consts, worker, ok, bad):
             bad(f"{tag} 缺镜像 {consts['image']} {hint}")
 
 
+def doctor_runtime_repo(consts, worker, ok, bad):
+    """逐项检查 DOWNLOADS.md 第 9 项所需的 MiaAI 部署仓库文件。"""
+    files = runtime_repo_files(consts)
+    labels = {"compose": "docker-compose.dspark.yml", "start": "start-deepseek-v4-flash-dspark.sh",
+              "stop": "stop-deepseek-v4-flash-dspark.sh"}
+    missing_local = [labels[key] for key, path in files.items()
+                     if not (os.path.isfile(path) if key == "compose" else os.access(path, os.X_OK))]
+    if missing_local:
+        for name in missing_local:
+            bad(f"HEAD 缺少 runtime 文件: {consts['runtime_repo']}/{name}")
+    else:
+        ok(f"HEAD runtime repo 就绪: {consts['runtime_repo']}")
+    checks = " && ".join(
+        f"[ {'-f' if key == 'compose' else '-x'} {shlex.quote(path)} ]"
+        for key, path in files.items()
+    )
+    result = ssh_task(worker, checks)
+    if result.returncode != 0:
+        for name in labels.values():
+            remote_path = f"{consts['runtime_repo']}/{name}"
+            remote = ssh_task(worker, f"test {'-f' if name == labels['compose'] else '-x'} {shlex.quote(remote_path)}")
+            if remote.returncode != 0:
+                bad(f"WORKER 缺少 runtime 文件: {consts['runtime_repo']}/{name}")
+    else:
+        ok(f"WORKER runtime repo 就绪: {consts['runtime_repo']}")
+    if missing_local or result.returncode != 0:
+        bad("请按 docs/DOWNLOADS.md 第 9 项从 https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark 下载，固定到 a4ce87a2f47f1be8fe64c297a0cf33a9a5e509aa，再将仓库内容放入 common.runtime_repo")
+
+
 def doctor_model(consts, worker, ok, bad):
-    """双机模型缓存（检查 config 指向的真实模型目录，install 前也可执行）。"""
+    """逐项检查 DOWNLOADS.md 第 7 项模型文件，并检查总大小。"""
     model_path = consts["default_model"]
+    required = model_required_files(model_path)
+    missing_local = [path for path in required if not os.path.isfile(path)]
+    if missing_local:
+        for path in missing_local:
+            bad(f"HEAD 缺少模型文件: {path}")
+        bad("请按 docs/DOWNLOADS.md 第 7 项准备 DeepSeek-V4-Flash-0731 模型；模型官方地址: https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731")
+    else:
+        ok(f"HEAD 模型关键文件齐全: {model_path}")
     for tag, target in (("HEAD", None), ("WORKER", worker)):
         if target:
+            checks = " && ".join(f"[ -f {shlex.quote(path)} ]" for path in required)
+            result = ssh_task(target, checks)
+            if result.returncode != 0:
+                for path in required:
+                    if ssh_task(target, f"test -f {shlex.quote(path)}").returncode != 0:
+                        bad(f"WORKER 缺少模型文件: {path}")
+                bad("请按 docs/DOWNLOADS.md 第 7 项将完整模型同步到 worker 的相同路径")
+            else:
+                ok(f"WORKER 模型关键文件齐全: {model_path}")
             r = ssh_task(target, f"du -sb {shlex.quote(model_path)} 2>/dev/null | cut -f1")
             size = r.stdout.strip()
         else:
@@ -704,6 +817,7 @@ def cmd_doctor(consts, cfg, args):
         bad(f"SSH {worker} 不通")
     doctor_check_node(consts, worker, ok, bad)
     doctor_image(consts, worker, ok, bad)
+    doctor_runtime_repo(consts, worker, ok, bad)
     doctor_model(consts, worker, ok, bad)
     doctor_roce(consts, worker, ok, bad)
     # 8888 端口空闲（head 本机）

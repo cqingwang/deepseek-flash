@@ -13,7 +13,8 @@
 # ---------- 通用（common，双机一致） ----------
 common:
   user: chan                        # 双机统一用户名（sudo / docker / runuser）
-  repo: /opt/deepseek-flash         # MiaAI 部署仓库路径（双机）
+  repo: /opt/deepseek-flash         # 本项目部署根路径（双机）
+  runtime_repo: /opt/deepseek-flash/dspark  # MiaAI DSpark 子项目路径（双机）
   project: deepseek-v4-flash        # docker compose 项目名
   container: deepseek-v4-flash-vllm-dspark-1   # 容器名（双机各自同名）
   model_lib: /opt/models            # 宿主模型库根目录（各模型按 <org>/<model> 两级路径存放）

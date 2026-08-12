@@ -1,6 +1,7 @@
 # 07 部署启动（Anemll vLLM + MiaAI recipe）
 
-> 本文档对应 MiaAI 官方部署仓库 **94baabf**（text-only 0731 默认，2026-08-11）。
+> 本文档按 [DOWNLOADS.md](DOWNLOADS.md) 使用 MiaAI 部署仓库
+> **a4ce87a2f47f1be8fe64c297a0cf33a9a5e509aa**。
 > 从旧版（≤ `a4ce87a`）升级的变量迁移见 [09 章 §9.5](09-ops.md#95-升级与回滚)。
 
 ## 7.1 拉取运行时镜像（双机）
@@ -35,15 +36,24 @@ docker image inspect ghcr.io/anemll/dspark-vllm-gx10:0.1.1 --format '{{range .Re
 ## 7.2 部署仓库与配置（head）
 
 ```bash
-git clone https://github.com/MiaAI-Lab/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark.git \
-  ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
-cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
+# 本仓库已将 MiaAI runtime 作为 dspark/ 子模块下载；先核对并固定版本
+git -C dspark checkout a4ce87a2f47f1be8fe64c297a0cf33a9a5e509aa
+sudo mkdir -p /opt/deepseek-flash/dspark
+sudo rsync -a --delete dspark/ /opt/deepseek-flash/dspark/
+# worker 也必须准备同样的 DSpark 子项目，路径与 config.yaml 的 common.runtime_repo 一致
+ssh <USER>@<IP_MGMT_B> 'sudo mkdir -p /opt/deepseek-flash/dspark'
+rsync -a --delete dspark/ <USER>@<IP_MGMT_B>:/tmp/deepseek-flash-dspark/
+ssh <USER>@<IP_MGMT_B> 'sudo rsync -a --delete /tmp/deepseek-flash-dspark/ /opt/deepseek-flash/dspark/ && rm -rf /tmp/deepseek-flash-dspark'
 ```
 
 > `.env.dspark` 由本仓库的 `program.py install` 根据 `config.yaml` 和 `dspark.env.json` 自动生成，
 > 不再手工复制 `.env.dspark.example`；模型下载和双机就位由部署前准备阶段完成。
 
 配置要点（详见 [VARIABLES.md](../VARIABLES.md)）：
+
+> 本仓库通过 `dspark/` 子模块提供 MiaAI 的 compose 和启动脚本。`common.runtime_repo` 所指的
+> DSpark 子项目必须
+> 先同步到 head/worker；启动脚本位于该仓库目录，不在 `/opt/models/...` 模型目录内。
 
 - `WORKER_HOST=<IP_MGMT_B>`（head 用来 SSH worker 的地址）
 - `MASTER_ADDR=<IP_FABRIC_A>`、`VLLM_HOST_IP=<IP_FABRIC_A>`、`WORKER_VLLM_HOST_IP=<IP_FABRIC_B>`
@@ -64,7 +74,7 @@ cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
 复现包自带 `program.py doctor`（在 head 上经 `./deploy.sh --doctor` 调用）：
 
 ```bash
-./deploy.sh --doctor                # 默认取 config.yaml 的 worker.ssh
+./deploy.sh --doctor                # 默认取 config.yaml 的 worker.ssh；也检查两台 runtime repo
 ./deploy.sh --doctor <IP_MGMT_B>    # Wi-Fi DHCP 漂移时用参数覆盖 worker 目标
 ```
 
@@ -79,7 +89,7 @@ cd ~/deepseek-flash
 ```
 
 `install` 自动完成：同步简化部署程序和配置 → 注册双机模型 symlink → 生成并同步 `.env.dspark` →
-**先起 worker** → 起 head → 调用上游 94baabf 的 start 脚本（包含 Issue #22/#21 hotfix）→ 等待 API。
+**先起 worker** → 起 head → 调用上游部署仓库的 start 脚本 → 等待 API。
 
 **冷启动约 6–9 分钟**，关键日志：
 

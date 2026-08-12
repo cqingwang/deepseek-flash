@@ -5,11 +5,11 @@
 ```bash
 cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
 ./deploy.sh status                              # 双机容器与 API 状态
-docker compose --env-file /opt/deepseek-flash/.env.dspark \
-  -f /opt/deepseek-flash/docker-compose.dspark.yml logs --tail=200
+docker compose --env-file /opt/deepseek-flash/dspark/.env.dspark \
+  -f /opt/deepseek-flash/dspark/docker-compose.dspark.yml logs --tail=200
 ./deploy.sh stop                                # 停止（先停 head 后停 worker）
-docker compose --env-file /opt/deepseek-flash/.env.dspark \
-  -f /opt/deepseek-flash/docker-compose.dspark.yml ps
+docker compose --env-file /opt/deepseek-flash/dspark/.env.dspark \
+  -f /opt/deepseek-flash/dspark/docker-compose.dspark.yml ps
 ```
 
 ## 9.2 开机自恢复（下载类任务）

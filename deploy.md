@@ -23,7 +23,12 @@ docs/                 分章节教程（07 部署 / 08 验证 / 09 运维 / 10 �
 部署布局（install 自动完成）：
 - `program.py` / `config.yaml` / `dspark.env.json` → 双机 `/etc/dspark-vllm/`
 - systemd 单元 → 双机 `/etc/systemd/system/`
-- 生产 `.env.dspark` → 双机 `$REPO/.env.dspark`（`/opt/deepseek-flash/`，不入 git）
+- 生产 `.env.dspark` → 双机 `$RUNTIME_REPO/.env.dspark`（`/opt/deepseek-flash/dspark/`，不入 git）
+
+运行时前置依赖（不由本仓库或模型目录提供）：`common.runtime_repo` 指向的 MiaAI DSpark 子项目（按
+`docs/DOWNLOADS.md` 第 9 项固定到 `a4ce87a2f47f1be8fe64c297a0cf33a9a5e509aa`），
+两台机器均需存在 `docker-compose.dspark.yml`、`start-deepseek-v4-flash-dspark.sh` 和
+`stop-deepseek-v4-flash-dspark.sh`。模型目录只保存模型权重、配置和 `encoding/` 等模型文件。
 
 已删除：`scripts/` 目录全部旧脚本（启动、安装、自检、长上下文验证、`.env` 模板等——功能均已并入
 `program.py` / `dspark.env.json`）。
@@ -67,7 +72,7 @@ docs/                 分章节教程（07 部署 / 08 验证 / 09 运维 / 10 �
 | | `restart` | = stop + start（head 上） |
 | | `live_check [--wait 秒]` | curl `common.api_url` 健康检查；--wait 轮询（install 内部复用） |
 | | `chat_verify [目标tokens]` | 长上下文解码性能验证（Issue #22，默认 620000；原 longctx-verify.py） |
-| 自检（head） | `doctor [worker目标]` | 双机环境自检：SSH/GPU/CUDA/镜像/模型/RoCE/端口，FAIL 计数决定退出码 |
+| 自检（head） | `doctor [worker目标]` | 双机环境自检：SSH/GPU/CUDA/镜像/runtime repo/模型/RoCE/端口，FAIL 计数决定退出码 |
 | 运行支撑（双机，systemd 直调） | `start` / `stop` | 仅 head（角色校验） |
 | | `ensure` | 仅 worker（容器守护） |
 | | `status` | 双机容器与 API 状态 |

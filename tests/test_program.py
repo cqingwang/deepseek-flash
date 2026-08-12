@@ -15,8 +15,9 @@ class ContainerStateTests(unittest.TestCase):
             "project": "deepseek-v4-flash",
             "api_url": "http://127.0.0.1:8888/v1/models",
             "repo": "/opt/deepseek-flash",
-            "compose_file": "/opt/deepseek-flash/docker-compose.dspark.yml",
-            "env_file": "/opt/deepseek-flash/.env.dspark",
+            "runtime_repo": "/opt/deepseek-flash/dspark",
+            "compose_file": "/opt/deepseek-flash/dspark/docker-compose.dspark.yml",
+            "env_file": "/opt/deepseek-flash/dspark/.env.dspark",
         }
 
     @mock.patch("program.subprocess.run")
@@ -51,6 +52,15 @@ class ContainerStateTests(unittest.TestCase):
         self.assertEqual(args[-3:], ["up", "-d", "vllm-dspark"])
         self.assertEqual(args[0], "-p")
 
+    @mock.patch("program.open", new_callable=mock.mock_open,
+                 read_data="WORKER_HOST=192.168.2.161\nMASTER_ADDR=10.100.240.1\nMASTER_PORT=25000\n")
+    def test_recovery_env_matches_main_explicit_head_values(self, _open):
+        values = program.recovery_env(self.k)
+        self.assertEqual(values["WORKER_HOST"], "192.168.2.161")
+        self.assertEqual(values["MASTER_ADDR"], "10.100.240.1")
+        self.assertEqual(values["VLLM_HOST"], "127.0.0.1")
+        self.assertEqual(values["VLLM_HOST_IP"], "10.100.240.1")
+
     @mock.patch("program.compose_up")
     @mock.patch("program.os.path.isfile", return_value=True)
     @mock.patch("program.container_running_local", return_value=False)
@@ -66,12 +76,35 @@ class ContainerStateTests(unittest.TestCase):
     @mock.patch("program.dotask")
     @mock.patch("program.container_running_remote", return_value=False)
     @mock.patch("program.container_exists_local", return_value=False)
+    @mock.patch("program.os.access", return_value=True)
     @mock.patch("program.api_healthy", return_value=True)
     @mock.patch("program.node_role", return_value="head")
     def test_start_skips_healthy_api_before_script_probe(
-        self, _role, _healthy, _head_exists, _worker_running, dotask
+        self, _role, _healthy, _executable, _head_exists, _worker_running, dotask
     ):
         self.assertEqual(program.cmd_start(self.k, {}, []), 0)
+        dotask.assert_not_called()
+
+    @mock.patch("program.api_healthy")
+    @mock.patch("program.logtask")
+    @mock.patch("program.os.access", return_value=False)
+    @mock.patch("program.node_role", return_value="head")
+    def test_start_requires_upstream_script_before_api_probe(self, _role, _executable, logtask, api_healthy):
+        def fail_on_missing(action, desc="", level=program.LogLevel.INFO):
+            if "缺少可执行的" in action:
+                raise SystemExit(1)
+
+        logtask.side_effect = fail_on_missing
+        with self.assertRaises(SystemExit):
+            program.cmd_start(self.k, {}, [])
+        api_healthy.assert_not_called()
+
+    @mock.patch("program.dotask")
+    @mock.patch("program.os.access", return_value=False)
+    @mock.patch("program.node_role", return_value="head")
+    def test_stop_fails_when_upstream_script_is_missing(self, _role, _executable, dotask):
+        with self.assertRaises(SystemExit):
+            program.cmd_stop(self.k, {}, [])
         dotask.assert_not_called()
 
 
@@ -104,6 +137,28 @@ class CliValidationTests(unittest.TestCase):
 
 
 class ConfigurationBehaviorTests(unittest.TestCase):
+    def test_parser_constants_derives_runtime_files_from_runtime_repo(self):
+        cfg = {
+            "common": {
+                "user": "chan",
+                "repo": "/opt/deepseek-flash",
+                "runtime_repo": "/opt/deepseek-flash/dspark",
+                "project": "deepseek-v4-flash",
+                "container": "deepseek-v4-flash-vllm-dspark-1",
+                "model_lib": "/opt/models",
+                "model_links": "/opt/models/models",
+                "default_model": "/opt/models/org/model",
+                "vllm_image": "image:tag",
+                "api_url": "http://127.0.0.1:8888/v1/models",
+            },
+            "head": {"hostname": "head", "fabric_ip": "10.0.0.1"},
+            "worker": {"hostname": "worker", "ssh": "chan@worker"},
+        }
+        consts = program.parser_constants(cfg)
+        self.assertEqual(consts["runtime_repo"], "/opt/deepseek-flash/dspark")
+        self.assertEqual(consts["env_file"], "/opt/deepseek-flash/dspark/.env.dspark")
+        self.assertEqual(consts["compose_file"], "/opt/deepseek-flash/dspark/docker-compose.dspark.yml")
+
     def test_resolve_model_uses_configured_model_root(self):
         consts = {
             "model_lib": "/srv/models",
@@ -121,9 +176,60 @@ class ConfigurationBehaviorTests(unittest.TestCase):
         with mock.patch("builtins.open", mock.mock_open(read_data="SERVED_MODEL_NAME=custom-model\n")):
             self.assertEqual(program.installed_model_name(consts), "custom-model")
 
+    def test_runtime_repo_paths_are_separate_from_model_library(self):
+        consts = {
+            "repo": "/opt/deepseek-flash",
+            "runtime_repo": "/opt/deepseek-flash/dspark",
+            "model_lib": "/opt/models",
+            "compose_file": "/opt/deepseek-flash/dspark/docker-compose.dspark.yml",
+        }
+        files = program.runtime_repo_files(consts)
+        self.assertEqual(files["start"], "/opt/deepseek-flash/dspark/start-deepseek-v4-flash-dspark.sh")
+        self.assertTrue(all(path.startswith("/opt/deepseek-flash/dspark/") for path in files.values()))
+        self.assertNotIn("/opt/models", files["start"])
+
+    def test_compose_uses_runtime_repo_as_working_directory(self):
+        consts = {
+            "project": "deepseek-v4-flash",
+            "runtime_repo": "/opt/deepseek-flash/dspark",
+            "env_file": "/opt/deepseek-flash/dspark/.env.dspark",
+            "compose_file": "/opt/deepseek-flash/dspark/docker-compose.dspark.yml",
+        }
+        with mock.patch("program.dotask") as dotask:
+            program.compose_up(consts, {"NODE_RANK": "0"})
+        self.assertEqual(dotask.call_args.kwargs["cwd"], consts["runtime_repo"])
+        self.assertIn(consts["compose_file"], dotask.call_args.args[1])
+
+    @mock.patch("program.ssh_task")
+    @mock.patch("program.os.access", return_value=False)
+    @mock.patch("program.os.path.isfile", return_value=False)
+    def test_doctor_reports_each_missing_runtime_file(self, _isfile, _access, ssh):
+        ssh.return_value = subprocess.CompletedProcess(["ssh"], 1, stdout="", stderr="")
+        consts = {
+            "repo": "/opt/deepseek-flash",
+            "runtime_repo": "/opt/deepseek-flash/dspark",
+            "compose_file": "/opt/deepseek-flash/dspark/docker-compose.dspark.yml",
+        }
+        ok_messages = []
+        bad_messages = []
+        program.doctor_runtime_repo(consts, "chan@worker", ok_messages.append, bad_messages.append)
+        self.assertTrue(any("docker-compose.dspark.yml" in message for message in bad_messages))
+        self.assertTrue(any("start-deepseek-v4-flash-dspark.sh" in message for message in bad_messages))
+        self.assertTrue(any("stop-deepseek-v4-flash-dspark.sh" in message for message in bad_messages))
+        self.assertTrue(any("DOWNLOADS.md 第 9 项" in message for message in bad_messages))
+
+    def test_model_required_files_match_download_manifest_core(self):
+        required = program.model_required_files("/opt/models/org/model")
+        self.assertIn("/opt/models/org/model/config.json", required)
+        self.assertIn("/opt/models/org/model/encoding/encoding_dsv4.py", required)
+        self.assertIn("/opt/models/org/model/model-00001-of-00048.safetensors", required)
+        self.assertIn("/opt/models/org/model/model-00048-of-00048.safetensors", required)
+        self.assertEqual(sum(path.endswith(".safetensors") for path in required), 48)
+
     @mock.patch("program.ssh_task")
     @mock.patch("program.dotask")
-    def test_doctor_checks_real_default_model_before_symlink_registration(self, dotask, ssh):
+    @mock.patch("program.os.path.isfile", return_value=True)
+    def test_doctor_checks_real_default_model_before_symlink_registration(self, _isfile, dotask, ssh):
         consts = {
             "default_model": "/srv/models/org/model",
             "model_links": "/srv/models/models",

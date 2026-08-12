@@ -27,10 +27,10 @@ curl http://<IP_MGMT_A>:8888/v1/chat/completions \
 ```bash
 cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
 ./deploy.sh status
+docker compose --env-file /opt/deepseek-flash/dspark/.env.dspark \
+  -f /opt/deepseek-flash/dspark/docker-compose.dspark.yml ps
 docker compose --env-file /opt/deepseek-flash/.env.dspark \
-  -f /opt/deepseek-flash/docker-compose.dspark.yml ps
-docker compose --env-file /opt/deepseek-flash/.env.dspark \
-  -f /opt/deepseek-flash/docker-compose.dspark.yml logs --tail=200
+  -f /opt/deepseek-flash/dspark/docker-compose.dspark.yml logs --tail=200
 ```
 
 实测结果：**6/6 请求全部成功**。
@@ -109,4 +109,3 @@ KV 池是共享的：总在线 token ≤ ~2.3M，长上下文与高并发互斥�
 **结论**：>600K 上下文 decode 稳定在 70–73 tok/s，与短上下文基线一致，确认修复有效
 （修复前同场景 ~1.0 tok/s，16 倍减速）。首次请求 TTFT 偏长是 FlashInfer autotune 缓存加载
 + GPU 预热，后续即热态。
-
