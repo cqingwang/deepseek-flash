@@ -290,6 +290,12 @@ class ConfigurationBehaviorTests(unittest.TestCase):
         self.assertIn("/opt/models/org/model/model-00048-of-00048.safetensors", required)
         self.assertEqual(sum(path.endswith(".safetensors") for path in required), 48)
 
+    def test_runtime_script_clears_hf_revision_for_local_model_paths(self):
+        with open("dspark/start-deepseek-v4-flash-dspark.sh", encoding="utf-8") as script:
+            content = script.read()
+        self.assertIn('if [[ "$DSPARK_MODEL" = /* ]]; then', content)
+        self.assertIn('DSPARK_REVISION=""', content)
+
     @mock.patch("program.ssh_task")
     @mock.patch("program.dotask")
     @mock.patch("program.os.path.isfile", return_value=True)
@@ -342,7 +348,7 @@ class ModelLinkLayoutTests(unittest.TestCase):
         ln_calls = [c for c in dotask.call_args_list if c.args[0] == "sudo ln -sfn"]
         self.assertEqual(
             ln_calls[0].args[1],
-            ["/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731",
+            ["../deepseek-ai/DeepSeek-V4-Flash-0731",
              "/opt/models/models/DeepSeek-V4-Flash-0731"])
 
 

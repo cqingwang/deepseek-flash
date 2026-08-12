@@ -532,6 +532,9 @@ def link_model(consts, model_dir):
     """
     short = os.path.basename(model_dir.rstrip("/"))
     dst = f"{consts['model_links']}/{short}"
+    # Compose 将整个 model_lib 挂载到 /cache/huggingface；绝对宿主 symlink
+    # 目标会在容器内仍指向 /opt/models，成为断链，必须使用相对目标。
+    symlink_target = os.path.relpath(model_dir, os.path.dirname(dst))
     logtask("link_model", f"注册模型 {model_dir} -> {dst}（双机）")
     if not os.path.isfile(f"{model_dir}/config.json"):
         logtask(f"{model_dir}/config.json 不存在（检查模型目录）", level=LogLevel.ERROR)
@@ -541,13 +544,13 @@ def link_model(consts, model_dir):
     if os.path.lexists(dst) and not os.path.islink(dst):
         logtask(f"{dst} 已存在且不是 symlink，请人工确认", level=LogLevel.ERROR)
     dotask("sudo mkdir -p", [consts["model_links"]], check=True)
-    dotask("sudo ln -sfn", [model_dir, dst], check=True)
+    dotask("sudo ln -sfn", [symlink_target, dst], check=True)
     logtask("link_model", f"worker {consts['worker_ssh']}: {dst} -> {model_dir}")
     ssh_task(consts["worker_ssh"],
             f"set -e; "
             f"if [ ! -f {shlex.quote(model_dir)}/config.json ]; then echo '  [FAIL] config.json 不存在' >&2; exit 1; fi; "
             f"if [ -e {shlex.quote(dst)} ] && [ ! -L {shlex.quote(dst)} ]; then echo '  [FAIL] {dst} 已存在且不是 symlink' >&2; exit 1; fi; "
-            f"sudo mkdir -p {shlex.quote(consts['model_links'])} && sudo ln -sfn {shlex.quote(model_dir)} {shlex.quote(dst)}",
+            f"sudo mkdir -p {shlex.quote(consts['model_links'])} && sudo ln -sfn {shlex.quote(symlink_target)} {shlex.quote(dst)}",
              check=True)
     logtask("link_model", f"双机 {dst} 已指向 {model_dir}")
 
