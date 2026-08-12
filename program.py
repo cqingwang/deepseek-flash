@@ -557,14 +557,14 @@ def cmd_install(consts, cfg, args):
     deploy_units(consts)
     if container_exists_local(consts) or container_exists_remote(consts):
         logtask("install", "检测到现存容器，先停止")
-        cmd_stop(consts, [])
+        cmd_stop(consts, cfg, [])
     else:
         logtask("install", "未检测到现存容器，直接安装")
     short = os.path.basename(model_dir.rstrip("/"))
     logtask("install", f"模型: {model_dir} (served: {short.lower()})")
     link_model(consts, model_dir)
     install_env(consts, cfg, model_dir)
-    cmd_start(consts, [])
+    cmd_start(consts, cfg, [])
     if not wait_for_api(consts):
         logtask("install 完成但 API 未就绪", level=LogLevel.ERROR)
     activate_units(consts)
@@ -574,7 +574,7 @@ def cmd_install(consts, cfg, args):
 
 def cmd_uninstall(consts, cfg, rest):
     logtask("uninstall", f"清理部署：停容器、移除双机模型注册 symlink、禁用 systemd 自启；config={consts['config_local']}")
-    cmd_stop(consts, [])
+    cmd_stop(consts, cfg, [])
     logtask("uninstall", f"移除模型注册 {consts['model_links']}/*（双机，仅 symlink）")
     if os.path.isdir(consts["model_links"]):
         for name in os.listdir(consts["model_links"]):
@@ -593,8 +593,8 @@ def cmd_uninstall(consts, cfg, rest):
 
 def cmd_restart(consts, cfg, rest):
     logtask("restart", f"重启集群（= stop + start，head 上）；config={consts['config_local']}")
-    cmd_stop(consts, [])
-    return cmd_start(consts, [])
+    cmd_stop(consts, cfg, [])
+    return cmd_start(consts, cfg, [])
 
 
 def cmd_live_check(consts, cfg, args):

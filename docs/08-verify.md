@@ -29,7 +29,7 @@ cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
 ./deploy.sh status
 docker compose --env-file /opt/deepseek-flash/dspark/.env.dspark \
   -f /opt/deepseek-flash/dspark/docker-compose.dspark.yml ps
-docker compose --env-file /opt/deepseek-flash/.env.dspark \
+docker compose --env-file /opt/deepseek-flash/dspark/.env.dspark \
   -f /opt/deepseek-flash/dspark/docker-compose.dspark.yml logs --tail=200
 ```
 

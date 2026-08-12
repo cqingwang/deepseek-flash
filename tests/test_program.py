@@ -107,6 +107,38 @@ class ContainerStateTests(unittest.TestCase):
             program.cmd_stop(self.k, {}, [])
         dotask.assert_not_called()
 
+    @mock.patch("program.cmd_start", return_value=0)
+    @mock.patch("program.cmd_stop")
+    def test_restart_forwards_config_to_nested_commands(self, stop, start):
+        cfg = {"common": {"repo": "/opt/deepseek-flash"}}
+        self.k["config_local"] = "/etc/dspark-vllm/config.yaml"
+        self.assertEqual(program.cmd_restart(self.k, cfg, []), 0)
+        stop.assert_called_once_with(self.k, cfg, [])
+        start.assert_called_once_with(self.k, cfg, [])
+
+    @mock.patch("program.activate_units")
+    @mock.patch("program.wait_for_api", return_value=True)
+    @mock.patch("program.cmd_start", return_value=0)
+    @mock.patch("program.install_env")
+    @mock.patch("program.link_model")
+    @mock.patch("program.container_exists_remote", return_value=False)
+    @mock.patch("program.container_exists_local", return_value=False)
+    @mock.patch("program.deploy_units")
+    @mock.patch("program.deploy_ops")
+    @mock.patch("program.validate_runtime_repo")
+    @mock.patch("program.os.path.isfile", return_value=True)
+    def test_install_forwards_config_to_nested_start(
+        self, _isfile, _validate, _deploy_ops, _deploy_units,
+        _head_exists, _worker_exists, _link_model, _install_env,
+        start, _wait, _activate,
+    ):
+        consts = dict(self.k, config_local="/etc/dspark-vllm/config.yaml",
+                      default_model="/opt/models/org/model", model_lib="/opt/models")
+        cfg = {"common": {"repo": "/opt/deepseek-flash"}}
+        args = argparse.Namespace(model=None)
+        self.assertEqual(program.cmd_install(consts, cfg, args), 0)
+        start.assert_called_once_with(consts, cfg, [])
+
 
 class CliValidationTests(unittest.TestCase):
     def test_doctor_command_parses(self):

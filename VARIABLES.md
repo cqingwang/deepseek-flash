@@ -10,6 +10,10 @@
 | `<IP_MGMT_A>` | head 管理 IP（你 SSH 用的地址） | 同一 LAN 内 |
 | `<IP_MGMT_B>` | worker 管理 IP | 同一 LAN 内 |
 | `<MGMT_IF>` | 管理网口（NCCL 引导面用，两台一致） | 有线 `enP7s7` 或 Wi-Fi `wlP9s9` |
+| `common.repo` | 本项目部署根路径（双机） | `/opt/deepseek-flash` |
+| `common.runtime_repo` | MiaAI DSpark 子项目路径（双机，包含 compose/start/stop） | `/opt/deepseek-flash/dspark` |
+| `common.model_lib` | 宿主模型库根目录 | `/opt/models` |
+| `common.default_model` | 默认模型绝对路径 | `/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731` |
 | `<IP_FABRIC_A>` | head 集群网 IP（Cluster Assistant 生成） | 示例 `10.100.192.1` |
 | `<IP_FABRIC_B>` | worker 集群网 IP | 示例 `10.100.192.2` |
 | `<IP_FABRIC_A2>` / `<IP_FABRIC_B2>` | 第二条链路 IP（同子网对） | 示例 `10.100.193.1/2` |
