@@ -53,6 +53,8 @@ docs/                 分章节教程（07 部署 / 08 验证 / 09 运维 / 10 �
 - `program.py` 按本机 hostname 识别 head/worker 角色：head 上 `start` 先检查 API；head 缺失且
   worker 已运行时直接 compose 拉起 head，否则交给上游 start 脚本完成完整启动；head 上 `stop`=
   head 先停 → worker 后停（幂等）；worker 上 `ensure`=拉起 worker 容器（systemd 开机守护，幂等）。
+- 上游 `start/stop-deepseek-v4-flash-dspark.sh` 也会按 `WORKER_HOST` 对本机 hostname/IP 做 worker
+  角色保护；在 worker 直接执行 head 编排脚本会快速失败，不会重复启动或停止另一套集群。
 - 上游容器编排仍调用 MiaAI 仓库 `start/stop-deepseek-v4-flash-dspark.sh`（94baabf，含
   Issue #22 hotfix）；program.py 只做编排与兜底 compose 拉起，不重复实现上游逻辑。
 - 上游 start 脚本在 worker 容器已在时会拒绝执行，故 head 缺失 + worker 在时由 program.py
