@@ -158,6 +158,13 @@ class CliValidationTests(unittest.TestCase):
         parser = program.build_parser()
         self.assertEqual(parser.parse_args(["doctor"]).command, "doctor")
 
+    def test_display_command_accepts_only_on_or_off(self):
+        parser = program.build_parser()
+        self.assertEqual(parser.parse_args(["display", "off"]).mode, "off")
+        self.assertEqual(parser.parse_args(["display", "on"]).mode, "on")
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["display", "invalid"])
+
     def test_live_check_rejects_negative_wait(self):
         with self.assertRaises(SystemExit):
             program.build_parser().parse_args(["live_check", "--wait", "-1"])
@@ -179,6 +186,36 @@ class CliValidationTests(unittest.TestCase):
             program.logtask("test", "message")
         printer.assert_called_once()
         self.assertIs(printer.call_args.kwargs["file"], stderr)
+
+
+class DisplayModeTests(unittest.TestCase):
+    def setUp(self):
+        self.k = {
+            "head_hostname": "spark-a",
+            "worker_ssh": "chan@spark-b",
+        }
+
+    @mock.patch("program.ssh_task")
+    @mock.patch("program.dotask")
+    @mock.patch("program.node_role", return_value="head")
+    @mock.patch("program.socket.gethostname", return_value="spark-a")
+    def test_display_off_sets_multi_user_on_both_nodes(self, _hostname, _role, dotask, ssh):
+        self.assertEqual(program.cmd_display(self.k, {}, argparse.Namespace(mode="off")), 0)
+        dotask.assert_called_once_with("sudo systemctl set-default", ["multi-user.target"], check=True)
+        ssh.assert_called_once_with(
+            "chan@spark-b", "sudo systemctl set-default multi-user.target", check=True
+        )
+
+    @mock.patch("program.ssh_task")
+    @mock.patch("program.dotask")
+    @mock.patch("program.node_role", return_value="head")
+    @mock.patch("program.socket.gethostname", return_value="spark-a")
+    def test_display_on_sets_graphical_on_both_nodes(self, _hostname, _role, dotask, ssh):
+        self.assertEqual(program.cmd_display(self.k, {}, argparse.Namespace(mode="on")), 0)
+        dotask.assert_called_once_with("sudo systemctl set-default", ["graphical.target"], check=True)
+        ssh.assert_called_once_with(
+            "chan@spark-b", "sudo systemctl set-default graphical.target", check=True
+        )
 
 
 class ConfigurationBehaviorTests(unittest.TestCase):

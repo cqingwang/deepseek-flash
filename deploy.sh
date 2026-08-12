@@ -9,6 +9,7 @@
 #   bash deploy.sh --restart              重启集群（= stop + start）
 #   bash deploy.sh --live_check           双机/API 健康检查
 #   bash deploy.sh --doctor               双机环境自检
+#   bash deploy.sh --display off|on         设置双机默认终端/图形启动模式
 #   bash deploy.sh --help                 显示本帮助
 # 兼容无 "--" 前缀写法（如 deploy.sh start）。
 # =============================================================================

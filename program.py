@@ -444,6 +444,19 @@ def cmd_status(consts, cfg, rest):
     return 0
 
 
+def cmd_display(consts, cfg, args):
+    """设置 head/worker 的 systemd 默认启动模式，不切换当前运行 target。"""
+    if node_role(consts) != "head":
+        logtask(f"display 只能在 head({consts['head_hostname']}) 上执行", level=LogLevel.ERROR)
+    target = "graphical.target" if args.mode == "on" else "multi-user.target"
+    mode_desc = "图形界面" if args.mode == "on" else "终端"
+    logtask("display", f"设置双机默认启动模式为{mode_desc}（{target}）；仅重启后生效，不中断当前服务")
+    dotask("sudo systemctl set-default", [target], check=True)
+    ssh_task(consts["worker_ssh"], f"sudo systemctl set-default {shlex.quote(target)}", check=True)
+    logtask("display", f"head({socket.gethostname()}) 与 worker({consts['worker_ssh']}) 已设置为 {target}")
+    return 0
+
+
 # ---- 编排命令（head 上，经 deploy.sh） ----
 
 def deploy_ops(consts, cfg):
@@ -907,6 +920,7 @@ def cmd_help(consts=None, cfg=None, rest=None):
   install [模型路径]        安装/覆盖安装（缺省用 common.default_model）
   uninstall                清理部署（停容器+移除模型注册+禁用自启）
   restart                  重启集群（= stop + start）
+  display off|on            设置双机默认终端/图形启动模式（重启后生效）
   live_check [--wait <秒>]  API 健康检查（--wait 轮询）
   chat_verify [目标tokens]  长上下文解码性能验证（Issue #22，默认 620000）
   doctor [worker目标]       双机环境自检
@@ -953,6 +967,8 @@ def build_parser():
     pm.add_argument("model", nargs="?", help="模型绝对路径（缺省 common.default_model）")
     sub.add_parser("uninstall", help="清理部署")
     sub.add_parser("restart", help="重启集群（= stop + start）")
+    pm = sub.add_parser("display", help="设置双机默认终端/图形启动模式")
+    pm.add_argument("mode", choices=("off", "on"), help="off=终端模式，on=图形界面模式")
     pm = sub.add_parser("live_check", help="API 健康检查")
     pm.add_argument("--wait", type=non_negative_int, metavar="<秒>", help="轮询等待秒数（缺省一次检查）")
     pm = sub.add_parser("chat_verify", help="长上下文解码性能验证（Issue #22）")
@@ -989,6 +1005,7 @@ def main(argv):
         "install": cmd_install,
         "uninstall": cmd_uninstall,
         "restart": cmd_restart,
+        "display": cmd_display,
         "live_check": cmd_live_check,
         "chat_verify": cmd_chat_verify,
         "doctor": cmd_doctor,

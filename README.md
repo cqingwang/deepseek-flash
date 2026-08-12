@@ -78,6 +78,8 @@
 ./deploy.sh --install [模型]      # 安装/覆盖安装（缺省 common.default_model）
 ./deploy.sh --uninstall           # 清理部署（停容器+移除模型注册+禁用自启）
 ./deploy.sh --restart             # 重启集群（= stop + start）
+./deploy.sh --display off          # 双机默认终端模式（重启后生效，节省图形界面资源）
+./deploy.sh --display on           # 双机默认图形界面模式（重启后生效）
 ./deploy.sh --live_check          # API 健康检查
 ./deploy.sh --chat_verify [tokens]  # 长上下文解码性能验证（Issue #22，默认 620000）
 ./deploy.sh --doctor [worker]     # 双机环境自检（SSH/GPU/CUDA/镜像/模型/RoCE/端口，FAIL=0 才可部署）
@@ -124,6 +126,17 @@
 ./deploy.sh --restart                            # 重启集群 = stop + start（head 上；幂等）
 sudo systemctl start dspark-vllm-head.service    # 或单点拉起 head；worker 由 ensure 守护自动跟随
 ```
+
+**设置默认显示模式**
+
+```bash
+./deploy.sh --display off                         # head 与 worker 默认进入终端模式
+./deploy.sh --display on                          # head 与 worker 默认进入图形界面
+```
+
+该命令在两台机器上分别执行 `systemctl set-default`：`off` 对应
+`multi-user.target`，`on` 对应 `graphical.target`。它只修改下次启动使用的
+systemd target，不会切换当前 target，也不会停止正在运行的 DSpark 服务；重启两台机器后生效。
 
 **停止**
 
