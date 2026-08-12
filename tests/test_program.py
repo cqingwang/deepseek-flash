@@ -64,5 +64,43 @@ class CliValidationTests(unittest.TestCase):
         self.assertIs(printer.call_args.kwargs["file"], stderr)
 
 
+class ModelLinkLayoutTests(unittest.TestCase):
+    """模型注册布局：宿主 /opt/models/<org>/<model> → symlink model_links/<short> → 容器内 /cache/huggingface/models/<short>。"""
+
+    def setUp(self):
+        self.cfg = {
+            "common": {
+                "model_lib": "/opt/models",
+                "model_links": "/opt/models/models",
+                "master_port": 25000,
+                "vllm_image": "ghcr.io/anemll/dspark-vllm-gx10:0.1.1",
+            },
+            "head": {"fabric_ip": "10.100.240.1", "hca": "rocep1s0f0", "ifname": "enp1s0f0np0"},
+            "worker": {"fabric_ip": "10.100.240.2", "management_ip": "10.100.240.2",
+                       "hca": "rocep1s0f0", "ifname": "enp1s0f0np0"},
+        }
+
+    def test_gen_env_model_official_uses_single_short_per_main_template(self):
+        env = program.gen_env(self.cfg, "/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731", template={})
+        # main 分支 .env.dspark 模板约定：DSPARK_MODEL_OFFICIAL=/cache/huggingface/models/<HF_MODEL_SHORT>（单层）
+        self.assertIn(
+            "DSPARK_MODEL_OFFICIAL=/cache/huggingface/models/DeepSeek-V4-Flash-0731", env)
+        self.assertIn(
+            "DSPARK_ENCODING_FILE=/cache/huggingface/models/DeepSeek-V4-Flash-0731/encoding/encoding_dsv4.py", env)
+
+    @mock.patch("program.ssh_task")
+    @mock.patch("program.dotask")
+    @mock.patch("program.os.path.isfile", return_value=True)
+    def test_link_model_registers_single_short_symlink_to_org_model_dir(self, _isfile, dotask, _ssh):
+        k = {"model_links": "/opt/models/models", "model_lib": "/opt/models",
+             "worker_ssh": "chan@spark-b"}
+        program.link_model(k, "/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731")
+        ln_calls = [c for c in dotask.call_args_list if c.args[0] == "sudo ln -sfn"]
+        self.assertEqual(
+            ln_calls[0].args[1],
+            ["/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731",
+             "/opt/models/models/DeepSeek-V4-Flash-0731"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@
 #
 # 两种用法：
 #   A. 管理与部署（head 上执行，经 deploy.sh 转发）：
-#        install / uninstall / restart / live_check / chat_verify / preflight / help
+#        install / uninstall / restart / live_check / chat_verify / doctor / help
 #   B. 部署后运行支撑（双机本机，systemd 单元 ExecStart 直调）：
 #        start / stop / ensure / status      —— 按本机 hostname 识别 head/worker 角色
 #   另含工具命令 load-config / gen-env（install 内部复用 + 调试导出）；
@@ -56,7 +56,7 @@ def logtask(action, desc="", level=LogLevel.INFO):
     """统一日志：时间戳 + level + action[: desc]；ERROR 打印后退出应用（快速失败）。
 
     level 取 LogLevel.INFO / WARN / ERROR。过程日志统一走本函数；数据输出（.env 内容、
-    load-config 导出行、chat_verify JSON 报告、preflight 检查清单）不经过本函数，
+    load-config 导出行、chat_verify JSON 报告、doctor 检查清单）不经过本函数，
     保持纯 stdout 供管道捕获。ERROR 调用后进程以非 0 退出。
     """
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -107,14 +107,14 @@ def parser_constants(cfg):
     }
 
 
-def ssh_run(ssh_target, command, check=False):
+def ssh_task(ssh_target, command, check=False):
     """经 SSH 在远端执行命令（BatchMode 免密，命令整体作为单参传递）；返回 CompletedProcess。"""
     return dotask("ssh -o BatchMode=yes -o ConnectTimeout=10", [ssh_target, command], check=check)
 
 
-def scp_to_worker(ssh_target, paths):
-    """分发文件到 worker 的 /tmp/（保留文件名）。"""
-    dotask("scp -q", paths + [f"{ssh_target}:/tmp/"], check=True)
+def scp_task(ssh_target, paths, desc="/tmp/"):
+    """分发文件到 worker（保留文件名）；远端目标目录缺省 /tmp/，可传 desc 覆盖。"""
+    dotask("scp -q", paths + [f"{ssh_target}:{desc}"], check=True)
 
 
 def sudo_install(src, dst, mode):
@@ -180,14 +180,14 @@ def container_running_local(consts):
 
 
 def container_exists_remote(consts):
-    r = ssh_run(consts["worker_ssh"],
+    r = ssh_task(consts["worker_ssh"],
                 f"docker ps -a --format '{{{{.Names}}}}' 2>/dev/null | grep -qx {shlex.quote(consts['container'])}")
     return r.returncode == 0
 
 
 def container_running_remote(consts):
     """远端运行中的容器查询；停止容器不能满足 head 恢复条件。"""
-    r = ssh_run(consts["worker_ssh"],
+    r = ssh_task(consts["worker_ssh"],
                 f"docker ps --format '{{{{.Names}}}}' 2>/dev/null | grep -qx {shlex.quote(consts['container'])}")
     return r.returncode == 0
 
@@ -208,7 +208,7 @@ def compose_up(consts, env_override, service=None):
 def ensure_worker(consts):
     """head 触发 worker 容器守护（远端 program.py ensure）。"""
     logtask("ensure_worker", f"worker({consts['worker_ssh']}) 确保容器在")
-    ssh_run(consts["worker_ssh"],
+    ssh_task(consts["worker_ssh"],
             f"sudo {consts['program_remote']} --config {consts['config_remote']} ensure", check=True)
 
 
@@ -306,7 +306,7 @@ def cmd_stop(consts, cfg, rest):
     # 兜底：worker 容器若仍存活
     if container_exists_remote(consts):
         logtask("stop", "worker 容器仍在，强制停止")
-        ssh_run(consts["worker_ssh"],
+        ssh_task(consts["worker_ssh"],
                 f"cd {shlex.quote(consts['repo'])} && "
                 f"docker compose -p {shlex.quote(consts['project'])} --env-file .env.dspark -f docker-compose.dspark.yml stop 2>/dev/null || "
                 f"docker stop {shlex.quote(consts['container'])} 2>/dev/null || true")
@@ -337,7 +337,7 @@ def cmd_status(consts, cfg, rest):
     else:
         head_state = "不存在"
     logtask("status", f"head({socket.gethostname()}): {consts['container']} {head_state}")
-    r = ssh_run(consts["worker_ssh"],
+    r = ssh_task(consts["worker_ssh"],
                 f"docker ps -a --format '{{{{.Names}}}}\t{{{{.Status}}}}' 2>/dev/null | grep {shlex.quote(consts['container'])} || echo '无 worker 容器'")
     logtask("status", f"worker({consts['worker_ssh']}): {r.stdout.strip() or '无 worker 容器'}")
     if api_healthy(consts):
@@ -363,16 +363,16 @@ def deploy_ops(consts, cfg):
     sudo_install(program_local, consts["program_remote"], "0755")
     sudo_install(template_local, consts["template_remote"], "0644")
     sudo_install(config_local, consts["config_remote"], "0644")
-    scp_to_worker(consts["worker_ssh"], [program_local, template_local, config_local])
+    scp_task(consts["worker_ssh"], [program_local, template_local, config_local])
     p_name, t_name, c_name = (os.path.basename(program_local), os.path.basename(template_local),
                               os.path.basename(config_local))
-    ssh_run(consts["worker_ssh"],
+    ssh_task(consts["worker_ssh"],
             f"sudo install -d -m 0755 /etc/dspark-vllm && "
             f"sudo install -m 0755 /tmp/{shlex.quote(p_name)} {consts['program_remote']} && "
             f"sudo install -m 0644 /tmp/{shlex.quote(t_name)} {consts['template_remote']} && "
             f"sudo install -m 0644 /tmp/{shlex.quote(c_name)} {consts['config_remote']} && "
             f"rm -f /tmp/{shlex.quote(p_name)} /tmp/{shlex.quote(t_name)} /tmp/{shlex.quote(c_name)}",
-            check=True)
+             check=True)
 
 
 def deploy_units(consts):
@@ -386,12 +386,12 @@ def deploy_units(consts):
     sudo_install(head_unit, "/etc/systemd/system/dspark-vllm-head.service", "0644")
     dotask("sudo systemctl daemon-reload", check=True)
     dotask("sudo systemctl enable dspark-vllm-head.service", check=True)
-    scp_to_worker(consts["worker_ssh"], [worker_unit])
-    ssh_run(consts["worker_ssh"],
+    scp_task(consts["worker_ssh"], [worker_unit])
+    ssh_task(consts["worker_ssh"],
             "sudo install -m 0644 /tmp/dspark-vllm-worker.service /etc/systemd/system/dspark-vllm-worker.service && "
             "rm -f /tmp/dspark-vllm-worker.service && sudo systemctl daemon-reload && "
             "sudo systemctl enable dspark-vllm-worker.service",
-            check=True)
+             check=True)
 
 
 def resolve_model(consts, model_arg):
@@ -410,7 +410,12 @@ def resolve_model(consts, model_arg):
 
 
 def link_model(consts, model_dir):
-    """双机注册模型 symlink：/opt/models/models/<short> -> 宿主绝对路径。"""
+    """双机注册模型 symlink：model_links/<short> -> 宿主 <model_lib>/<org>/<model>。
+
+    容器内 /cache/huggingface/models/<short> 按单层 short 引用（对应 main 分支
+    .env.dspark 模板 DSPARK_MODEL_OFFICIAL 约定），宿主侧以 model_links/<short> 单层
+    symlink 指向真实的 <org>/<model> 模型目录（如 /opt/models/deepseek-ai/DeepSeek-V4-Flash-0731）。
+    """
     short = os.path.basename(model_dir.rstrip("/"))
     dst = f"{consts['model_links']}/{short}"
     logtask("link_model", f"注册模型 {model_dir} -> {dst}（双机）")
@@ -424,13 +429,13 @@ def link_model(consts, model_dir):
     dotask("sudo mkdir -p", [consts["model_links"]], check=True)
     dotask("sudo ln -sfn", [model_dir, dst], check=True)
     logtask("link_model", f"worker {consts['worker_ssh']}: {dst} -> {model_dir}")
-    ssh_run(consts["worker_ssh"],
+    ssh_task(consts["worker_ssh"],
             f"set -e; "
             f"if [ ! -f {shlex.quote(model_dir)}/config.json ]; then echo '  [FAIL] config.json 不存在' >&2; exit 1; fi; "
             f"if [ -e {shlex.quote(dst)} ] && [ ! -L {shlex.quote(dst)} ]; then echo '  [FAIL] {dst} 已存在且不是 symlink' >&2; exit 1; fi; "
             f"sudo mkdir -p {shlex.quote(consts['model_links'])} && sudo ln -sfn {shlex.quote(model_dir)} {shlex.quote(dst)}",
-            check=True)
-    logtask("link_model", f"双机 /opt/models/models/{short} 已指向 {model_dir}")
+             check=True)
+    logtask("link_model", f"双机 {dst} 已指向 {model_dir}")
 
 
 def install_env(consts, cfg, model_dir):
@@ -442,8 +447,8 @@ def install_env(consts, cfg, model_dir):
         f.write(content)
     logtask("install_env", f"{consts['env_file']} 已生成（模型: {short}）")
     logtask("install_env", "同步 .env.dspark 到 worker")
-    scp_to_worker(consts["worker_ssh"], [consts["env_file"]])
-    ssh_run(consts["worker_ssh"], f"cp /tmp/.env.dspark {shlex.quote(consts['env_file'])} && rm -f /tmp/.env.dspark", check=True)
+    scp_task(consts["worker_ssh"], [consts["env_file"]])
+    ssh_task(consts["worker_ssh"], f"cp /tmp/.env.dspark {shlex.quote(consts['env_file'])} && rm -f /tmp/.env.dspark", check=True)
 
 
 def cmd_install(consts, cfg, args):
@@ -478,11 +483,11 @@ def cmd_uninstall(consts, cfg, rest):
             if os.path.islink(link):
                 logtask("uninstall", f"rm {link}")
                 dotask("sudo rm -f", [link])
-    ssh_run(consts["worker_ssh"], f"sudo find {shlex.quote(consts['model_links'])} -maxdepth 1 -type l -delete 2>/dev/null || true")
+    ssh_task(consts["worker_ssh"], f"sudo find {shlex.quote(consts['model_links'])} -maxdepth 1 -type l -delete 2>/dev/null || true")
     logtask("uninstall", "禁用 systemd 自启")
     dotask("sudo systemctl disable --now dspark-vllm-head.service",
            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    ssh_run(consts["worker_ssh"], "sudo systemctl disable --now dspark-vllm-worker.service 2>/dev/null || true")
+    ssh_task(consts["worker_ssh"], "sudo systemctl disable --now dspark-vllm-worker.service 2>/dev/null || true")
     logtask("uninstall", "完成")
     return 0
 
@@ -580,9 +585,9 @@ def cmd_chat_verify(consts, cfg, args):
     return 0
 
 
-# ---- 自检命令（head 上；原 repro-preflight.sh） ----
+# ---- doctor 命令（head 上；原 repro-preflight.sh） ----
 
-def preflight_check_node(consts, worker, ok, bad):
+def doctor_check_node(consts, worker, ok, bad):
     """双机 GPU/CUDA/Docker/sudo 探测（head 本地 / worker 走 SSH）。"""
     probe = """printf "gpu=%s cuda=%s docker=%s sudo_nopasswd=%s" \
 "$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)" \
@@ -591,7 +596,7 @@ def preflight_check_node(consts, worker, ok, bad):
 "$(sudo -n true 2>/dev/null && echo yes || echo no)\""""
     for tag, target in (("HEAD", None), ("WORKER", worker)):
         if target:
-            r = ssh_run(target, probe)
+            r = ssh_task(target, probe)
             out = r.stdout.strip()
         else:
             r = dotask(probe, shell=True)
@@ -602,12 +607,12 @@ def preflight_check_node(consts, worker, ok, bad):
             bad(f"{tag}: {out}")
 
 
-def preflight_image(consts, worker, ok, bad):
+def doctor_image(consts, worker, ok, bad):
     """双机运行时镜像存在（受限网络走离线包 docker load）。"""
     hint = f"（双机离线包 {consts['image_tar']}：docker load -i 导入并核对 tag）"
     for tag, target in (("HEAD", None), ("WORKER", worker)):
         if target:
-            r = ssh_run(target, f"docker image inspect {shlex.quote(consts['image'])} >/dev/null 2>&1")
+            r = ssh_task(target, f"docker image inspect {shlex.quote(consts['image'])} >/dev/null 2>&1")
         else:
             r = dotask("docker image inspect", [consts["image"]],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -617,12 +622,12 @@ def preflight_image(consts, worker, ok, bad):
             bad(f"{tag} 缺镜像 {consts['image']} {hint}")
 
 
-def preflight_model(consts, worker, ok, bad):
+def doctor_model(consts, worker, ok, bad):
     """双机模型缓存（经 deploy 注册的 symlink 目录，>160GB）。"""
     model_path = f"{consts['model_links']}/{os.path.basename(consts['default_model'].rstrip('/'))}"
     for tag, target in (("HEAD", None), ("WORKER", worker)):
         if target:
-            r = ssh_run(target, f"du -sb {shlex.quote(model_path)} 2>/dev/null | cut -f1")
+            r = ssh_task(target, f"du -sb {shlex.quote(model_path)} 2>/dev/null | cut -f1")
             size = r.stdout.strip()
         else:
             r = dotask(f"du -sb {shlex.quote(model_path)} 2>/dev/null | cut -f1", shell=True)
@@ -633,12 +638,12 @@ def preflight_model(consts, worker, ok, bad):
             bad(f"{tag} 模型缓存不足 ({size})")
 
 
-def preflight_roce(consts, worker, ok, bad):
+def doctor_roce(consts, worker, ok, bad):
     """双机 RoCE 链路 ACTIVE 计数。"""
     cmd = 'rdma link show 2>/dev/null | grep -c "state ACTIVE physical_state LINK_UP"'
     for tag, target in (("HEAD", None), ("WORKER", worker)):
         if target:
-            r = ssh_run(target, cmd)
+            r = ssh_task(target, cmd)
         else:
             r = dotask(cmd, shell=True)
         out = r.stdout.strip()
@@ -648,9 +653,9 @@ def preflight_roce(consts, worker, ok, bad):
             bad(f"{tag} 无 ACTIVE RoCE 链路")
 
 
-def cmd_preflight(consts, cfg, args):
+def cmd_doctor(consts, cfg, args):
     worker = args.worker or consts["worker_ssh"]
-    logtask("preflight", f"双机环境自检（SSH/GPU/CUDA/镜像/模型/RoCE/端口）；worker={worker} config={consts['config_local']}")
+    logtask("doctor", f"双机环境自检（SSH/GPU/CUDA/镜像/模型/RoCE/端口）；worker={worker} config={consts['config_local']}")
     fails = [0]
 
     def ok(msg):
@@ -661,14 +666,14 @@ def cmd_preflight(consts, cfg, args):
         fails[0] += 1
 
     print(f"=== head: {socket.gethostname()} / worker: {worker} ===")
-    if ssh_run(worker, "echo ok").returncode == 0:
+    if ssh_task(worker, "echo ok").returncode == 0:
         ok(f"SSH {worker}")
     else:
         bad(f"SSH {worker} 不通")
-    preflight_check_node(consts, worker, ok, bad)
-    preflight_image(consts, worker, ok, bad)
-    preflight_model(consts, worker, ok, bad)
-    preflight_roce(consts, worker, ok, bad)
+    doctor_check_node(consts, worker, ok, bad)
+    doctor_image(consts, worker, ok, bad)
+    doctor_model(consts, worker, ok, bad)
+    doctor_roce(consts, worker, ok, bad)
     # 8888 端口空闲（head 本机）
     r = dotask('ss -ltn "( sport = :8888 )" 2>/dev/null | tail -n +2 | grep -q .', shell=True)
     if r.returncode == 0:
@@ -677,9 +682,9 @@ def cmd_preflight(consts, cfg, args):
         ok("HEAD 8888 空闲")
     print()
     if fails[0] == 0:
-        logtask("preflight", "全部通过，可以开始部署")
+        logtask("doctor", "全部通过，可以开始部署")
         return 0
-    logtask("preflight", f"存在 {fails[0]} 项失败，请先修复", level=LogLevel.WARN)
+    logtask("doctor", f"存在 {fails[0]} 项失败，请先修复", level=LogLevel.WARN)
     return 1
 
 
@@ -725,7 +730,7 @@ def cmd_help(consts=None, cfg=None, rest=None):
   restart                  重启集群（= stop + start）
   live_check [--wait <秒>]  API 健康检查（--wait 轮询）
   chat_verify [目标tokens]  长上下文解码性能验证（Issue #22，默认 620000）
-  preflight [worker目标]    双机环境自检
+  doctor [worker目标]       双机环境自检（原 preflight）
 
 运行支撑（双机本机，systemd 单元直调）:
   start / stop             仅 head（worker 编排顺序）
@@ -765,28 +770,28 @@ def build_parser():
                         help="config.yaml 路径（缺省 /etc/dspark-vllm/config.yaml，systemd 本机调用）")
     sub = parser.add_subparsers(dest="command", metavar="<命令>")
     # 管理与部署（head，经 deploy.sh）
-    p = sub.add_parser("install", help="安装/覆盖安装")
-    p.add_argument("model", nargs="?", help="模型绝对路径（缺省 common.default_model）")
+    pm = sub.add_parser("install", help="安装/覆盖安装")
+    pm.add_argument("model", nargs="?", help="模型绝对路径（缺省 common.default_model）")
     sub.add_parser("uninstall", help="清理部署")
     sub.add_parser("restart", help="重启集群（= stop + start）")
-    p = sub.add_parser("live_check", help="API 健康检查")
-    p.add_argument("--wait", type=non_negative_int, metavar="<秒>", help="轮询等待秒数（缺省一次检查）")
-    p = sub.add_parser("chat_verify", help="长上下文解码性能验证（Issue #22）")
-    p.add_argument("target", nargs="?", type=positive_int, default=620000, metavar="<tokens>",
+    pm = sub.add_parser("live_check", help="API 健康检查")
+    pm.add_argument("--wait", type=non_negative_int, metavar="<秒>", help="轮询等待秒数（缺省一次检查）")
+    pm = sub.add_parser("chat_verify", help="长上下文解码性能验证（Issue #22）")
+    pm.add_argument("target", nargs="?", type=positive_int, default=620000, metavar="<tokens>",
                    help="目标 prompt tokens（默认 620000）")
-    p = sub.add_parser("preflight", help="双机环境自检")
-    p.add_argument("worker", nargs="?", help="worker SSH 目标（缺省 config worker.ssh）")
+    pm = sub.add_parser("doctor", help="双机环境自检")
+    pm.add_argument("worker", nargs="?", help="worker SSH 目标（缺省 config worker.ssh）")
     # 运行支撑（双机本机，systemd 直调）
     sub.add_parser("start", help="启动集群（head；worker 先起，head 后起）")
     sub.add_parser("stop", help="停止集群（head；head 先停，worker 后停）")
     sub.add_parser("ensure", help="worker 容器守护（worker）")
     sub.add_parser("status", help="双机容器与 API 状态")
     # 工具
-    p = sub.add_parser("load-config", help="导出 SECTION_KEY='value'（调试导出）")
-    p.add_argument("sections", nargs="*", default=["common", "head", "worker"], help="配置节（缺省全部）")
-    p = sub.add_parser("gen-env", help="生成完整 .env.dspark")
-    p.add_argument("--model", help="模型绝对路径（缺省 common.default_model）")
-    p.add_argument("--output", help="写入文件（缺省 stdout）")
+    pm = sub.add_parser("load-config", help="导出 SECTION_KEY='value'（调试导出）")
+    pm.add_argument("sections", nargs="*", default=["common", "head", "worker"], help="配置节（缺省全部）")
+    pm = sub.add_parser("gen-env", help="生成完整 .env.dspark")
+    pm.add_argument("--model", help="模型绝对路径（缺省 common.default_model）")
+    pm.add_argument("--output", help="写入文件（缺省 stdout）")
     sub.add_parser("help", help="本帮助")
     return parser
 
@@ -807,7 +812,7 @@ def main(argv):
         "restart": cmd_restart,
         "live_check": cmd_live_check,
         "chat_verify": cmd_chat_verify,
-        "preflight": cmd_preflight,
+        "doctor": cmd_doctor,
         "start": cmd_start,
         "stop": cmd_stop,
         "ensure": cmd_ensure,

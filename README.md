@@ -72,7 +72,84 @@
 # 6. 验证：curl http://<IP_MGMT_A>:8888/v1/models
 ```
 
-## 四、目录结构
+**命令速览**（head 上经 `./deploy.sh` 调用；全部功能唯一实现在 `program.py`，部署时随 config.yaml 同步到双机 `/etc/dspark-vllm/`）：
+
+```bash
+./deploy.sh --install [模型]      # 安装/覆盖安装（缺省 common.default_model）
+./deploy.sh --uninstall           # 清理部署（停容器+移除模型注册+禁用自启）
+./deploy.sh --restart             # 重启集群（= stop + start）
+./deploy.sh --live_check          # API 健康检查
+./deploy.sh --chat_verify [tokens]  # 长上下文解码性能验证（Issue #22，默认 620000）
+./deploy.sh --doctor [worker]     # 双机环境自检（原 --preflight；SSH/GPU/CUDA/镜像/模型/RoCE/端口，FAIL=0 才可部署）
+./deploy.sh --help                # 帮助
+```
+
+运行支撑（systemd 单元本机直调 `program.py`）：`start`/`stop`（head）、`ensure`（worker 容器守护）、`status`（双机状态）；工具命令 `load-config`/`gen-env`（install 内部复用）。
+
+## 四、真实项目用法（部署与日常维护）
+
+> 全部命令在 head 上经 `./deploy.sh` 调用（`--` 前缀可省，如 `./deploy.sh doctor`），唯一实现在
+> `program.py`（随 config.yaml 同步到双机 `/etc/dspark-vllm/`）。日常维护只涉及
+> `doctor / install / restart / stop / status` 这几个命令。
+
+### 4.1 部署（首次安装 / 覆盖安装）
+
+前置：模型已在**双机**就位（`/opt/models/<org>/<model>`，各含 `config.json` 与
+`encoding/encoding_dsv4.py`，worker 侧由 200G 内网 rsync 同步）、config.yaml 已按
+[VARIABLES.md](VARIABLES.md) 填好、SSH 免密、运行时镜像已就绪（受限网络用离线包 `docker load`）。
+
+```bash
+./deploy.sh --doctor                # 双机环境自检：SSH/GPU/CUDA/镜像/模型/RoCE/端口；FAIL=0 才可部署
+./deploy.sh --install [模型绝对路径] # 安装/覆盖安装；模型缺省 common.default_model
+```
+
+`install` 内部步骤（幂等，可重复执行）：
+
+1. 同步 `program.py` / `dspark.env.json` / `config.yaml` 到双机 `/etc/dspark-vllm/`
+2. 安装 head（start/stop）与 worker（ensure 守护）systemd 单元
+3. 检测到现存容器先停止
+4. 双机注册模型 symlink：`/opt/models/models/<short>` → `/opt/models/<org>/<model>`
+5. 由 `gen_env` 生成生产 `.env.dspark`（60+ 键，含 `DSPARK_MODEL_OFFICIAL=/cache/huggingface/models/<short>`）并同步双机
+6. 启动（worker 先起、head 后起）并轮询等待 API（冷启动最长约 20 分钟）
+
+### 4.2 日常维护
+
+**启动 / 重启**
+
+```bash
+./deploy.sh --restart                            # 重启集群 = stop + start（head 上；幂等）
+sudo systemctl start dspark-vllm-head.service    # 或单点拉起 head；worker 由 ensure 守护自动跟随
+```
+
+**停止**
+
+```bash
+./deploy.sh stop                                 # 停止集群（head 上；head 先停、worker 后停；幂等）
+./deploy.sh --uninstall                          # 彻底清理：停容器 + 移除双机模型 symlink + 禁用 systemd 自启
+```
+
+**换模型**
+
+```bash
+# 1. 新模型文件放 /opt/models/<org>/<model>（双机各一份；worker 用 200G 内网 rsync）
+# 2. 覆盖安装即完成切换：
+./deploy.sh --install /opt/models/<org>/<model>
+#    或改 config.yaml 的 common.default_model 后直接：./deploy.sh --install
+```
+
+换模型本质 = 重新 `install`：停旧容器 → 注册新模型 symlink → 按新模型重新生成 `.env.dspark` → 启动。
+注意：symlink 注册为单层 `<short>` 名（`/opt/models/models/<short>`），同名短名不同 `<org>` 的模型会互相
+覆盖——当前约定一次部署一个模型，切换靠重新 `install`（旧模型文件需仍在 `/opt/models` 下）。
+
+**状态与验证**
+
+```bash
+./deploy.sh status                               # 双机容器与 API 状态
+./deploy.sh --live_check                         # API 健康检查（--wait <秒> 可轮询等待）
+./deploy.sh --chat_verify [tokens]               # 长上下文解码性能验证（换模型后建议跑；默认 620000）
+```
+
+## 五、目录结构
 
 > 克隆后目录名 = 仓库名 `dgx-spark-2-deepseek-flash-0731`（git clone 会按仓库名建目录）。
 > 当前实际树：
@@ -85,7 +162,7 @@ dgx-spark-2-deepseek-flash-0731/
 ├── .gitignore                   # 忽略 .DS_Store / *.log
 ├── config.yaml                  # 集群参数 SSOT（common/head/worker 分类，program.py 读取）
 ├── deploy.sh                    # 统一部署入口（薄层：命令解析 → 转发 program.py）
-├── program.py                   # 唯一实现（install/uninstall/restart/live_check/preflight/start/stop/ensure/status）
+├── program.py                   # 唯一实现（install/uninstall/restart/live_check/chat_verify/doctor/start/stop/ensure/status/load-config/gen-env/help）
 ├── en/                          # 英文版整套文档（README + VARIABLES + docs/）
 ├── docs/
 │   ├── DOWNLOADS.md             # ★ 下载清单：要下载什么、官方路径、大小、校验
@@ -97,7 +174,7 @@ dgx-spark-2-deepseek-flash-0731/
 └── dspark.env.json             # .env.dspark 参数模板（固定键值 + null 占位变化键，gen-env 派生生产 .env）
 ```
 
-## 五、官方文档路径与下载物
+## 六、官方文档路径与下载物
 
 **先读 [docs/DOWNLOADS.md](docs/DOWNLOADS.md)**——它列出了全部需要下载的东西（NVIDIA Sync、
 系统 OTA、NCCL 源码、Anemll 镜像、166.9GB 模型、Python 工具、部署仓库），每项都带官方路径、
@@ -122,7 +199,7 @@ dgx-spark-2-deepseek-flash-0731/
 > 已批量抓取为 Markdown 快照存放在 [docs/official/](docs/official/)，并附
 > **准备阶段命令对照验证报告**（与官方逐条核对 + 双机实测）：[docs/official/README.md](docs/official/README.md)。
 
-## 六、安全与脱敏说明
+## 七、安全与脱敏说明
 
 - 文档不含任何真实 IP、主机名、MAC、Wi-Fi/代理口令或 SSH 私钥。
 - 部署中的 `sudo` 密码请自行设置，**不要**启用文档示例中的任何默认口令。
