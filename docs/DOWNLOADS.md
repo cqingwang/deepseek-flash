@@ -20,7 +20,7 @@
 | 官方路径 | [DGX Spark 用户指南](https://docs.nvidia.com/dgx/dgx-spark/)；[首次启动](https://docs.nvidia.com/dgx/dgx-spark/first-boot.html)；DGX Dashboard |
 | 内容 | 系统软件（要求 ≥ 2026-04）、ConnectX-7 / USBPD 固件 |
 | 大小 | 数 GB（apt 增量） |
-| 校验 | `sudo nvidia-spark-ota-check summary` → `torn-score: 0`；`cat /etc/dgx-release` 看 `DGX_OTA_VERSION`；`fwupdmgr get-devices \| grep -A2 MT2910` 看 ConnectX-7 固件 |
+| 校验 | **先按官方流程升级**（Dashboard 或 `apt dist-upgrade` + `fwupdmgr`，见 02 章步骤 1）后：`cat /etc/dgx-release` 看 `DGX_OTA_VERSION`；`LC_ALL=C apt-cache policy dgx-spark-ota-update-meta` → `Installed` ≥ 26.04.1（≥ 2026-04）；`fwupdmgr get-devices \| grep -A2 MT2910` 看 ConnectX-7 固件；仅当工具包已随 OTA 安装后：`sudo nvidia-spark-ota-check summary` → `torn-score: 0` |
 
 ## 3. NCCL 编译依赖（两台 Spark）
 

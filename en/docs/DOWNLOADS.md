@@ -21,7 +21,7 @@
 | Official source | [DGX Spark User Guide](https://docs.nvidia.com/dgx/dgx-spark/); [First Boot](https://docs.nvidia.com/dgx/dgx-spark/first-boot.html); DGX Dashboard |
 | Content | System software (requires ≥ 2026-04), ConnectX-7 / USBPD firmware |
 | Size | several GB (apt incremental) |
-| Verify | `sudo nvidia-spark-ota-check summary` → `torn-score: 0`; `cat /etc/dgx-release` for `DGX_OTA_VERSION`; `fwupdmgr get-devices \| grep -A2 MT2910` for ConnectX-7 firmware |
+| Verify | **After upgrading via the official flow** (Dashboard or `apt dist-upgrade` + `fwupdmgr`, see ch. 02 step 1): `cat /etc/dgx-release` for `DGX_OTA_VERSION`; `LC_ALL=C apt-cache policy dgx-spark-ota-update-meta` → `Installed` ≥ 26.04.1 (≥ 2026-04); `fwupdmgr get-devices \| grep -A2 MT2910` for ConnectX-7 firmware; only if the package was delivered with your OTA: `sudo nvidia-spark-ota-check summary` → `torn-score: 0` |
 
 ## 3. NCCL build dependency (both Sparks)
 
