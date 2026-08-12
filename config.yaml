@@ -23,6 +23,7 @@ common:
   vllm_image: ghcr.io/anemll/dspark-vllm-gx10:0.1.1   # 运行时镜像
   image_tar: /opt/dspark-vllm-gx10_v0.1.1.tar.gz     # 离线镜像包（受限网络优先 docker load）
   api_url: http://127.0.0.1:8888/v1/models           # 健康检查端点
+  vllm_api_key: deepseek                                  # vLLM HTTP 服务 API 密钥（--api-key 生成到 .env.dspark 的 VLLM_API_KEY；空串则关闭鉴权）
   master_port: 25000                # NCCL/分布式 master 端口
 
 # ---------- head 节点（spark-a，主控） ----------

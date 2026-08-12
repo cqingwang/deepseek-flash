@@ -389,5 +389,81 @@ class ModelLinkLayoutTests(unittest.TestCase):
              "/opt/models/models/DeepSeek-V4-Flash-0731"])
 
 
+class ApiKeyTests(unittest.TestCase):
+    """HTTP 鉴权（config.common.vllm_api_key → .env.dspark VLLM_API_KEY → vLLM --api-key）。
+
+    缺陷驱动契约（回归防护）：若 gen_env 不注入 VLLM_API_KEY、或 chat_verify 请求头
+    缺失 Authorization Bearer，下列断言必然失败，标志鉴权对接回归。
+    """
+
+    def setUp(self):
+        self.cfg = {
+            "common": {
+                "model_lib": "/opt/models",
+                "model_links": "/opt/models/models",
+                "master_port": 25000,
+                "vllm_image": "ghcr.io/anemll/dspark-vllm-gx10:0.1.1",
+                "api_url": "http://127.0.0.1:8888/v1/models",
+                "vllm_api_key": "deepseek",
+            },
+            "head": {"fabric_ip": "10.100.240.1", "hca": "rocep1s0f0",
+                     "ifname": "enp1s0f0np0", "management_ip": "192.168.2.180"},
+            "worker": {"fabric_ip": "10.100.240.2", "management_ip": "192.168.2.161",
+                       "hca": "rocep1s0f0", "ifname": "enp1s0f0np0"},
+        }
+        self.k = {
+            "api_url": self.cfg["common"]["api_url"],
+            "vllm_api_key": self.cfg["common"]["vllm_api_key"],
+            "env_file": "/opt/deepseek-flash/dspark/.env.dspark",
+        }
+
+    def test_gen_env_injects_vllm_api_key_from_config(self):
+        env = program.gen_env(self.cfg, "/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731",
+                              template={"VLLM_API_KEY": None})
+        self.assertIn("VLLM_API_KEY=deepseek", env)
+
+    def test_gen_env_empty_key_stays_empty(self):
+        cfg = dict(self.cfg)
+        cfg["common"] = dict(self.cfg["common"], vllm_api_key="")
+        env = program.gen_env(cfg, "/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731",
+                              template={"VLLM_API_KEY": None})
+        self.assertIn("VLLM_API_KEY=", env)
+
+    @mock.patch("program.installed_model_name", return_value="deepseek-v4-flash-0731")
+    def test_chat_verify_sends_authorization_bearer_with_key(self, _model):
+        import urllib.request
+
+        request_args = []
+
+        def fake_urlopen(req, timeout=3600):
+            request_args.append(req)
+            raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", req.headers, None)
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             mock.patch("program.logtask", side_effect=lambda *a, **k: None):
+            try:
+                program.cmd_chat_verify(self.k, self.cfg, argparse.Namespace(target=10))
+            except urllib.error.HTTPError:
+                pass
+        self.assertTrue(request_args)
+        self.assertEqual(request_args[0].get_header("Authorization"), "Bearer deepseek")
+
+    def test_parser_constants_exposes_vllm_api_key(self):
+        cfg = {
+            "common": {
+                "user": "chan", "repo": "/opt/deepseek-flash",
+                "runtime_repo": "/opt/deepseek-flash/dspark", "project": "deepseek-v4-flash",
+                "container": "deepseek-v4-flash-vllm-dspark-1",
+                "model_lib": "/opt/models", "model_links": "/opt/models/models",
+                "default_model": "/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731",
+                "vllm_image": "img", "api_url": "http://127.0.0.1:8888/v1/models",
+                "master_port": 25000, "vllm_api_key": "deepseek",
+            },
+            "head": {"hostname": "spark-a", "fabric_ip": "10.100.240.1"},
+            "worker": {"hostname": "spark-b", "ssh": "chan@spark-b"},
+        }
+        self.assertEqual(program.parser_constants(cfg)["vllm_api_key"], "deepseek")
+
+
 if __name__ == "__main__":
     unittest.main()

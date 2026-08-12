@@ -100,6 +100,7 @@ def parser_constants(cfg):
         "image": common["vllm_image"],
         "image_tar": common.get("image_tar", ""),
         "api_url": common["api_url"],
+        "vllm_api_key": common.get("vllm_api_key", ""),
         "env_file": f"{runtime_repo}/.env.dspark",
         "compose_file": f"{runtime_repo}/docker-compose.dspark.yml",
         "head_hostname": head["hostname"],
@@ -326,6 +327,8 @@ def gen_env(cfg, model_dir, template=None):
         template = load_env_template()
     d = dict(template)
     d.update({
+        # ---- HTTP 鉴权（config 派生；空串 = 不启用） ----
+        "VLLM_API_KEY": common.get("vllm_api_key", ""),
         # ---- 集群（config 派生） ----
         "WORKER_HOST": worker["management_ip"],
         "MASTER_ADDR": head["fabric_ip"],
@@ -665,13 +668,20 @@ def cmd_chat_verify(consts, cfg, args):
     base = consts["api_url"][: consts["api_url"].rfind("/models")]
     model = installed_model_name(consts)
     target = args.target
+    api_key = consts["vllm_api_key"]
     if target <= 0:
         logtask("chat_verify 的目标 tokens 必须大于 0", level=LogLevel.ERROR)
-    logtask("chat_verify", f"长上下文解码性能验证（Issue #22）：构造长 prompt 流式测速，判定 fp8/bf16 路径；model={model} base={base} target={target}")
+    logtask("chat_verify", f"长上下文解码性能验证（Issue #22）：构造长 prompt 流式测速，判定 fp8/bf16 路径；model={model} base={base} target={target} auth={'on' if api_key else 'off'}")
+
+    def http_headers(api_key):
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return headers
 
     def request_json(url, body, timeout=3600):
         req = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"})
+                                     headers=http_headers(api_key))
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.load(r)
 
@@ -696,7 +706,7 @@ def cmd_chat_verify(consts, cfg, args):
             "max_tokens": 64, "temperature": 0.2,
             "stream": True, "stream_options": {"include_usage": True}}
     req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers={"Content-Type": "application/json"})
+                                 headers=http_headers(api_key))
     started = time.perf_counter()
     first = None
     usage = None
