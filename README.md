@@ -122,6 +122,10 @@ dgx-spark-2-deepseek-flash-0731/
 > "哪些随包提供、哪些仅引用"的完整对照，见 [10 附录 §10.2](docs/10-appendices.md)。
 > 完整下载物清单见 [docs/DOWNLOADS.md](docs/DOWNLOADS.md)。
 
+> **官方文档离线镜像**：准备/初始化/OTA/集群/网络/NCCL/vLLM 相关的官方页面
+> 已批量抓取为 Markdown 快照存放在 [docs/official/](docs/official/)，并附
+> **准备阶段命令对照验证报告**（与官方逐条核对 + 双机实测）：[docs/official/README.md](docs/official/README.md)。
+
 ## 六、安全与脱敏说明
 
 - 文档不含任何真实 IP、主机名、MAC、Wi-Fi/代理口令或 SSH 私钥。
