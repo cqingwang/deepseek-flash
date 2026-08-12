@@ -76,21 +76,17 @@
 | `VARIABLES.md` | 脱敏变量对照表 |
 | `docs/DOWNLOADS.md` | 完整下载清单（官方路径/大小/校验） |
 | `docs/01-hardware.md` … `docs/10-appendices.md` | 分章节教程 |
-| `scripts/dsv4-chunkdl.py` | 分块下载器（sha256 校验 + 断点续传） |
-| `scripts/resume-downloads.sh` | 开机自恢复 |
-| `scripts/repro-preflight.sh` | 双机环境自检 |
-| `scripts/.env.dspark.example` | vLLM 双机配置模板（脱敏） |
-| `scripts/dspark-vllm-start.sh` | head 自启包装脚本（脱敏模板，替换占位符后安装到 `/usr/local/sbin/`） |
-| `scripts/dspark-vllm-stop.sh` | head 停止包装脚本（脱敏模板） |
-| `scripts/dspark-vllm-ensure.sh` | worker 容器守护脚本（脱敏模板） |
-| `scripts/dspark-vllm.service` | head systemd 单元（开机自启 + 失败重试） |
-| `scripts/dspark-vllm-worker.service` | worker systemd 单元（开机自启） |
-| `scripts/install-autostart.sh` | 一键安装自启（head 上执行，自动装到双机） |
+| `config.yaml` | 集群参数 SSOT（common/head/worker 分类，program.py 读取） |
+| `deploy.sh` | 统一部署入口（薄层：命令解析 → 转发 program.py） |
+| `program.py` | 唯一实现（install/uninstall/restart/live_check/preflight/start/stop/ensure/status；随部署同步到双机 /etc/dspark-vllm/） |
+| `dspark.env.json` | .env 参数模板（固定键值 + null 占位变化键，gen-env 派生生产 .env） |
+| `systemd/dspark-vllm-head.service` | head systemd 单元（ExecStart=program.py start / stop，开机自启 + 失败重试） |
+| `systemd/dspark-vllm-worker.service` | worker systemd 单元（ExecStart=program.py ensure，开机自启） |
 
 ## 10.5 变量引用速查
 
 所有 `<占位符>` 定义见 [VARIABLES.md](../VARIABLES.md)。替换完成后：
 
 ```bash
-rg -n "<[A-Z_]+>" README.md docs/ scripts/   # 确认没有遗漏
+rg -n "<[A-Z_]+>" README.md docs/ dspark.env.json   # 确认没有遗漏
 ```

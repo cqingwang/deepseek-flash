@@ -1,0 +1,46 @@
+# =============================================================================
+# DeepSeek-V4-Flash 双机集群配置（单一真相源 SSOT）
+#
+# program.py（唯一实现）读取本文件，按 common / head / worker 分类取值。
+# 解析方式：python3 program.py --config <本文件> <命令>（依赖 pyyaml，缺失时提示安装）。
+#
+# 部署约定：
+#   deploy.sh --install 会把本文件与 program.py 同步到双机 /etc/dspark-vllm/；
+#   systemd 单元以绝对路径 --config /etc/dspark-vllm/config.yaml 调用 program.py。
+#   管理网为 Wi-Fi（wlP9s9）DHCP 动态分配，IP 漂移后请同步更新本文件。
+# =============================================================================
+
+# ---------- 通用（common，双机一致） ----------
+common:
+  user: chan                        # 双机统一用户名（sudo / docker / runuser）
+  repo: /opt/deepseek-flash         # MiaAI 部署仓库路径（双机）
+  project: deepseek-v4-flash        # docker compose 项目名
+  container: deepseek-v4-flash-vllm-dspark-1   # 容器名（双机各自同名）
+  model_lib: /opt/models            # 宿主模型库根目录（各模型为平铺绝对路径）
+  model_links: /opt/models/models   # 模型 symlink 注册目录（容器内 /cache/huggingface/models 对应）
+  default_model: /opt/models/deepseek-ai/DeepSeek-V4-Flash-0731   # 默认模型绝对路径
+  vllm_image: ghcr.io/anemll/dspark-vllm-gx10:0.1.1   # 运行时镜像
+  image_tar: /opt/dspark-vllm-gx10_v0.1.1.tar.gz     # 离线镜像包（受限网络优先 docker load）
+  api_url: http://127.0.0.1:8888/v1/models           # 健康检查端点
+  master_port: 25000                # NCCL/分布式 master 端口
+
+# ---------- head 节点（spark-a，主控） ----------
+head:
+  hostname: spark-a
+  management_ip: 192.168.2.180      # 管理网 Wi-Fi（wlP9s9，DHCP）
+  management_if: wlP9s9
+  fabric_ip: 10.100.240.1           # 集群网链路0（RoCE，主链路）
+  fabric_ip2: 10.100.241.1          # 集群网链路1（RoCE，备用/双链路）
+  hca: rocep1s0f0                   # RoCE 设备（Port0 链路0）
+  ifname: enp1s0f0np0               # RoCE 网口
+
+# ---------- worker 节点（spark-b） ----------
+worker:
+  hostname: spark-b
+  ssh: chan@192.168.2.161           # head 管理 SSH 目标（Wi-Fi DHCP）
+  management_ip: 192.168.2.161
+  management_if: wlP9s9
+  fabric_ip: 10.100.240.2
+  fabric_ip2: 10.100.241.2
+  hca: rocep1s0f0
+  ifname: enp1s0f0np0

@@ -67,7 +67,7 @@
 | 大小 | **166.9 GB**，74 个文件 / 48 个 safetensors 分片 |
 | 放哪 | head：`$HOME/.cache/huggingface/models/DeepSeek-V4-Flash-0731/`；worker 由 200G 内网 rsync |
 | 校验 | 官方 LFS sha256 清单 74/74 全量通过（见 06 章），双机一致 |
-| 注意 | 不要用官方 HF 下载器直连（中国网络不通/极慢）；用仓库自带 `scripts/dsv4-chunkdl.py` |
+| 注意 | 不要用官方 HF 下载器直连（中国网络不通/极慢）；原仓库自带 `scripts/dsv4-chunkdl.py`（已随本次改造移除） |
 
 ## 8. Python 工具（head 一台即可）
 

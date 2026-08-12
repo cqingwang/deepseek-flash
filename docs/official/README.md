@@ -79,7 +79,7 @@
 |---|---|---|
 | `python3 -m venv ~/hf-venv` + pip install huggingface_hub hf_xet httpx | head 已建，Python 3.12.3 | ✅ |
 | `~/hf-venv/bin/hf version`（DOWNLOADS.md 第 8 项校验） | 1.26.1 | ✅ |
-| `~/dsv4-chunkdl.py` 分块下载器 | 存在且日志有成功记录 | ✅ |
+| ~~`~/dsv4-chunkdl.py` 分块下载器~~（已移除） | — | 模型已在 `/opt/models` 平铺就位 |
 | 官方 sha256 清单 `~/dsv4-files.json` | 存在（74 文件） | ✅ |
 | 模型落地 `~/.cache/huggingface/models/DeepSeek-V4-Flash-0731` | 156 GB 已就位 | ✅ |
 

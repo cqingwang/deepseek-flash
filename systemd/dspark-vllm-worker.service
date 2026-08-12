@@ -9,7 +9,7 @@ StartLimitBurst=5
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/sbin/dspark-vllm-ensure.sh
+ExecStart=/usr/bin/python3 /etc/dspark-vllm/program.py --config /etc/dspark-vllm/config.yaml ensure
 Restart=on-failure
 RestartSec=60
 TimeoutStartSec=1200

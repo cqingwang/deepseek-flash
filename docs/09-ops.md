@@ -13,6 +13,9 @@ docker compose --env-file .env.dspark -f docker-compose.dspark.yml ps
 
 ## 9.2 开机自恢复（下载类任务）
 
+> ⚠️ `scripts/resume-downloads.sh` 已从仓库移除（模型已在 `/opt/models` 就位，无需下载自恢复）。
+> 如下为历史记录，仅供理解恢复思路：
+
 ```bash
 chmod +x ~/resume-downloads.sh
 ( crontab -l 2>/dev/null | grep -v resume-downloads.sh; \
@@ -25,37 +28,37 @@ chmod +x ~/resume-downloads.sh
 ## 9.2b 推理服务开机自启（systemd，推荐）
 
 仅靠 `./start-deepseek-v4-flash-dspark.sh` 手动启动时，**机器重启后服务不会自动恢复**。
-本方案在 head/worker 各装一个 systemd 单元实现开机自启 + 崩溃自愈（复现包
-`scripts/` 提供脱敏模板）：
+本方案在 head/worker 各装一个 systemd 单元实现开机自启 + 崩溃自愈（单元 ExecStart
+直接调用 `program.py`）：
 
 | 节点 | 单元 | 行为 |
 |---|---|---|
-| head | `dspark-vllm.service` | 开机执行 start 包装脚本：API 已健康→跳过；worker 容器在而 head 缺失→compose 拉起 head 并等待；双缺→执行 `./start-...`。`Restart=on-failure`（60s 间隔，600s 内最多 5 次） |
-| worker | `dspark-vllm-worker.service` | 开机确保 worker 容器在（幂等） |
+| head | `dspark-vllm-head.service` | ExecStart=`program.py start`：API 已健康→跳过；worker 容器在而 head 缺失→compose 拉起 head 并等待；双缺→执行 `./start-...`。`Restart=on-failure`（60s 间隔，600s 内最多 5 次） |
+| worker | `dspark-vllm-worker.service` | ExecStart=`program.py ensure`：开机确保 worker 容器在（幂等） |
 | 双机 | 容器 `deepseek-v4-flash-vllm-dspark-1` | `restart: unless-stopped`（compose 已配置，见 07 章） |
 
-安装（在 head 上执行 `scripts/install-autostart.sh`，需先替换脚本里的
-`<USER>`、`<IP_MGMT_B>`、`<REPO_PATH>` 占位符）：
+安装（在 head 上执行 `./deploy.sh --install`，自动把 program.py + config.yaml 与
+systemd 单元部署到双机）：
 
 ```bash
-bash install-autostart.sh
+./deploy.sh --install
 # 验证（两台都应输出 enabled）
-systemctl is-enabled dspark-vllm.service        # head
+systemctl is-enabled dspark-vllm-head.service        # head
 systemctl is-enabled dspark-vllm-worker.service # worker
 ```
 
 日常启动/停止/重启（与手动脚本等价，且 head 会连带编排 worker）：
 
 ```bash
-sudo systemctl start dspark-vllm.service     # 幂等；冷启动会等待 API 就绪（最长约 20 分钟）
-sudo systemctl stop dspark-vllm.service      # 停双机容器
-sudo systemctl restart dspark-vllm.service
-sudo systemctl status dspark-vllm.service
-sudo journalctl -u dspark-vllm.service -f
+sudo systemctl start dspark-vllm-head.service     # 幂等；冷启动会等待 API 就绪（最长约 20 分钟）
+sudo systemctl stop dspark-vllm-head.service      # 停双机容器
+sudo systemctl restart dspark-vllm-head.service
+sudo systemctl status dspark-vllm-head.service
+sudo journalctl -u dspark-vllm-head.service -f
 ```
 
 > `systemctl stop` 会通过 ExecStop 调用 stop 脚本（head+worker 一起停）；
-> 若想彻底停用自启：`sudo systemctl disable dspark-vllm.service`（worker 同理）。
+> 若想彻底停用自启：`sudo systemctl disable dspark-vllm-head.service`（worker 同理）。
 
 ## 9.3 内核与内存加固
 

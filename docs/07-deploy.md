@@ -59,10 +59,11 @@ cp .env.dspark.example .env.dspark   # 模板在本仓库根目录；替换为 V
 
 ## 7.3 启动前自检
 
-复现包自带 `scripts/repro-preflight.sh`（本仓库，不在部署仓库里）。把它拷到 head 后执行：
+复现包自带 `program.py preflight`（在 head 上经 `./deploy.sh --preflight` 调用）：
 
 ```bash
-bash repro-preflight.sh <IP_MGMT_B>   # 双机 SSH/GPU/CUDA/镜像/模型/RoCE/端口
+./deploy.sh --preflight                # 默认取 config.yaml 的 worker.ssh
+./deploy.sh --preflight <IP_MGMT_B>    # Wi-Fi DHCP 漂移时用参数覆盖 worker 目标
 ```
 
 > 检查项全部 `[OK]` 且 `8888 空闲` 才满足部署前置条件；若某项 `[FAIL]` 按提示先修复。

@@ -1,5 +1,9 @@
 # 06 模型下载与完整性（适配受限网络）
 
+> ⚠️ **本仓库已移除下载脚本**：`scripts/dsv4-chunkdl.py` 与 `scripts/resume-downloads.sh` 不再随仓库提供
+> （模型已在 `/opt/models` 平铺就位，无需下载流程）。本章保留作为历史复现参考；
+> 模型已就位时可跳过本章，直接进入 [07 章](07-deploy.md)。
+
 ## 6.1 事实清单
 
 - 模型：`deepseek-ai/DeepSeek-V4-Flash-0731`（官方 0731 GA，I8/FP4 量化）

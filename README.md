@@ -83,22 +83,18 @@ dgx-spark-2-deepseek-flash-0731/
 ├── LICENSE                      # MIT 许可
 ├── VARIABLES.md                 # 全部脱敏占位符对照表（先替换）
 ├── .gitignore                   # 忽略 .DS_Store / *.log
+├── config.yaml                  # 集群参数 SSOT（common/head/worker 分类，program.py 读取）
+├── deploy.sh                    # 统一部署入口（薄层：命令解析 → 转发 program.py）
+├── program.py                   # 唯一实现（install/uninstall/restart/live_check/preflight/start/stop/ensure/status）
 ├── en/                          # 英文版整套文档（README + VARIABLES + docs/）
 ├── docs/
 │   ├── DOWNLOADS.md             # ★ 下载清单：要下载什么、官方路径、大小、校验
 │   ├── 01-hardware.md … 10-appendices.md   # 分章节教程
 │   └── perf/                    # 效果实录配图（监控面板实时截图）
-└── scripts/
-    ├── dsv4-chunkdl.py          # 自研分块下载器（断点续传 + sha256 校验）
-    ├── resume-downloads.sh      # 开机自恢复（下载/镜像）
-    ├── repro-preflight.sh       # 复现前环境自检
-    ├── .env.dspark.example      # vLLM 双机配置模板（脱敏）
-    ├── dspark-vllm-start.sh     # systemd 自启包装脚本（head，脱敏模板）
-    ├── dspark-vllm-stop.sh      # systemd 停止包装脚本（head，脱敏模板）
-    ├── dspark-vllm-ensure.sh    # worker 容器守护脚本（脱敏模板）
-    ├── dspark-vllm.service      # head systemd 单元
-    ├── dspark-vllm-worker.service  # worker systemd 单元
-    └── install-autostart.sh     # 一键安装双机自启
+├── systemd/
+│   ├── dspark-vllm-head.service    # head systemd 单元（ExecStart=program.py start / stop）
+│   └── dspark-vllm-worker.service  # worker systemd 单元（ExecStart=program.py ensure）
+└── dspark.env.json             # .env.dspark 参数模板（固定键值 + null 占位变化键，gen-env 派生生产 .env）
 ```
 
 ## 五、官方文档路径与下载物
