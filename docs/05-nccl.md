@@ -11,15 +11,17 @@ sudo apt-get update && sudo apt-get install -y libopenmpi-dev
 两台都执行（约 10–20 分钟）：
 
 ```bash
-git clone -b v2.30.7-1 https://github.com/NVIDIA/nccl.git ~/nccl
-cd ~/nccl
+sudo mkdir -p /opt/nccl /opt/nccl-tests
+sudo chown -R "$USER":"$(id -gn)" /opt/nccl /opt/nccl-tests
+git clone -b v2.30.7-1 https://github.com/NVIDIA/nccl.git /opt/nccl
+cd /opt/nccl
 make -j$(nproc) src.build NVCC_GENCODE="-gencode=arch=compute_121,code=sm_121"
 
-git clone https://github.com/NVIDIA/nccl-tests.git ~/nccl-tests
-cd ~/nccl-tests
+git clone https://github.com/NVIDIA/nccl-tests.git /opt/nccl-tests
+cd /opt/nccl-tests
 export CUDA_HOME=/usr/local/cuda
 export MPI_HOME=/usr/lib/aarch64-linux-gnu/openmpi
-export NCCL_HOME=$HOME/nccl/build/
+export NCCL_HOME=/opt/nccl/build/
 export LD_LIBRARY_PATH=$NCCL_HOME/lib:$CUDA_HOME/lib64/:$MPI_HOME/lib:$LD_LIBRARY_PATH
 make -j$(nproc) MPI=1
 ```
@@ -45,7 +47,7 @@ done
 ```bash
 export CUDA_HOME=/usr/local/cuda
 export MPI_HOME=/usr/lib/aarch64-linux-gnu/openmpi
-export NCCL_HOME=$HOME/nccl/build/
+export NCCL_HOME=/opt/nccl/build/
 export LD_LIBRARY_PATH=$NCCL_HOME/lib:$CUDA_HOME/lib64/:$MPI_HOME/lib:$LD_LIBRARY_PATH
 
 mpirun -np 2 -H <IP_MGMT_A>:1,<IP_MGMT_B>:1 \
@@ -54,10 +56,15 @@ mpirun -np 2 -H <IP_MGMT_A>:1,<IP_MGMT_B>:1 \
   -x UCX_NET_DEVICES=<MGMT_IF> \
   -x NCCL_SOCKET_IFNAME=<MGMT_IF> \
   -x OMPI_MCA_btl_tcp_if_include=<MGMT_IF> \
-  $HOME/nccl-tests/build/all_gather_perf -b 16G -e 16G -f 2
+  /opt/nccl-tests/build/all_gather_perf -b 16G -e 16G -f 2
 ```
 
 预期：两个 rank 各识别一块 GB10，`#wrong = 0`，busbw 约 **21 GB/s**（≈171 Gbit/s，单线缆合理值）。
+
+> `/opt/nccl` 和 `/opt/nccl-tests` 仅用于宿主机源码编译与 `mpirun` 验证。
+> DSpark 启动时使用 `ghcr.io/anemll/dspark-vllm-gx10:0.1.1` 镜像内的 CUDA/NCCL，
+> 当前 `docker-compose.dspark.yml` 不挂载这两个宿主目录，因此不需要把它们加入 `config.yaml`
+> 或修改 `start-deepseek-v4-flash-dspark.sh` 的运行时路径。
 
 ## 5.5 常见问题
 

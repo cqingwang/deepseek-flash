@@ -36,8 +36,8 @@
 |---|---|
 | 官方路径 | <https://github.com/NVIDIA/nccl>，**tag `v2.30.7-1`** |
 | 大小 | 约 50 MB |
-| 放哪 | `~/nccl/` |
-| 校验 | `git -C ~/nccl describe --tags` → `v2.30.7-1` |
+| 放哪 | `/opt/nccl/` |
+| 校验 | `git -C /opt/nccl describe --tags` → `v2.30.7-1` |
 
 ## 5. nccl-tests 源码（两台 Spark）
 
@@ -45,8 +45,8 @@
 |---|---|
 | 官方路径 | <https://github.com/NVIDIA/nccl-tests>，建议 pin `717b68318278e93f371d8ffb46b076069d7c7851`（2026-08-03） |
 | 大小 | 约 10 MB |
-| 放哪 | `~/nccl-tests/` |
-| 校验 | `git -C ~/nccl-tests rev-parse HEAD` |
+| 放哪 | `/opt/nccl-tests/` |
+| 校验 | `git -C /opt/nccl-tests rev-parse HEAD` |
 
 ## 6. vLLM 运行时镜像（两台 Spark，各一份）
 
