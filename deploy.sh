@@ -8,6 +8,7 @@
 #   bash deploy.sh --uninstall            清理部署（停容器+移除模型注册+禁用自启）
 #   bash deploy.sh --restart              重启集群（= stop + start）
 #   bash deploy.sh --live_check           双机/API 健康检查
+#   bash deploy.sh --perf on|off [tokens] 长上下文性能测试（思考模式开/关）
 #   bash deploy.sh --doctor               双机环境自检
 #   bash deploy.sh --display off|on         设置双机默认终端/图形启动模式
 #   bash deploy.sh --help                 显示本帮助

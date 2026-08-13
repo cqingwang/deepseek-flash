@@ -81,7 +81,7 @@
 ./deploy.sh --display off          # 双机默认终端模式（重启后生效，节省图形界面资源）
 ./deploy.sh --display on           # 双机默认图形界面模式（重启后生效）
 ./deploy.sh --live_check          # API 健康检查
-./deploy.sh --chat_verify [tokens]  # 长上下文解码性能验证（Issue #22，默认 620000）
+./deploy.sh --perf on|off [tokens]  # 长上下文性能测试（on=思考，off=关闭思考；默认 620000）
 ./deploy.sh --doctor [worker]     # 双机环境自检（SSH/GPU/CUDA/镜像/模型/RoCE/端口，FAIL=0 才可部署）
 ./deploy.sh --help                # 帮助
 ```
@@ -163,7 +163,7 @@ systemd target，不会切换当前 target，也不会停止正在运行的 DSpa
 ```bash
 ./deploy.sh status                               # 双机容器与 API 状态
 ./deploy.sh --live_check                         # API 健康检查（--wait <秒> 可轮询等待）
-./deploy.sh --chat_verify [tokens]               # 长上下文解码性能验证（换模型后建议跑；默认 620000）
+./deploy.sh --perf on|off [tokens]               # 长上下文性能测试（换模型后建议跑；默认 620000）
 ```
 
 ## 五、目录结构
@@ -179,7 +179,7 @@ dgx-spark-2-deepseek-flash-0731/
 ├── .gitignore                   # 忽略 .DS_Store / *.log
 ├── config.yaml                  # 集群参数 SSOT（common/head/worker 分类，program.py 读取）
 ├── deploy.sh                    # 统一部署入口（薄层：命令解析 → 转发 program.py）
-├── program.py                   # 唯一实现（install/uninstall/restart/live_check/chat_verify/doctor/start/stop/ensure/status/load-config/gen-env/help）
+├── program.py                   # 唯一实现（install/uninstall/restart/live_check/perf/doctor/start/stop/ensure/status/load-config/gen-env/help）
 ├── en/                          # 英文版整套文档（README + VARIABLES + docs/）
 ├── docs/
 │   ├── DOWNLOADS.md             # ★ 下载清单：要下载什么、官方路径、大小、校验

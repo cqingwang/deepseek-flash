@@ -39,7 +39,7 @@ docs/                 分章节教程（07 部署 / 08 验证 / 09 运维 / 10 �
 
 ```
 用法一：管理与部署 / 自检（head 上执行）
-   ./deploy.sh --install [模型] / --uninstall / --restart / --live_check / --chat_verify / --doctor
+   ./deploy.sh --install [模型] / --uninstall / --restart / --live_check / --perf on|off / --doctor
         │  剥掉 "--" 前缀 + 注入 config.yaml 路径（薄层，无业务逻辑）
         ▼
    python3 program.py --config <config.yaml> <命令> [参数]
@@ -73,7 +73,7 @@ docs/                 分章节教程（07 部署 / 08 验证 / 09 运维 / 10 �
 | | `uninstall` | stop → 移除双机模型 symlink → 禁用 systemd 自启 |
 | | `restart` | = stop + start（head 上） |
 | | `live_check [--wait 秒]` | curl `common.api_url` 健康检查；--wait 轮询（install 内部复用） |
-| | `chat_verify [目标tokens]` | 长上下文解码性能验证（Issue #22，默认 620000；原 longctx-verify.py） |
+| | `perf on|off [目标tokens]` | 长上下文性能测试（Issue #22；on=思考，off=关闭思考，默认 620000；从 `head.management_ip` 访问 API） |
 | 自检（head） | `doctor [worker目标]` | 双机环境自检：SSH/GPU/CUDA/镜像/runtime repo/模型/RoCE/端口，FAIL 计数决定退出码 |
 | 运行支撑（双机，systemd 直调） | `start` / `stop` | 仅 head（角色校验） |
 | | `ensure` | 仅 worker（容器守护） |
@@ -100,7 +100,7 @@ def logtask(action, desc="", level=LogLevel.INFO):
 
 - level：`LogLevel.INFO / WARN / ERROR`；ERROR 打印后进程以非 0 退出。
 - **过程日志**（动作/进度/警告/错误）统一走 logtask（写 stderr）；**数据输出**（gen-env 的 .env 内容、
-  load-config 导出行、chat_verify JSON 报告、doctor `[OK]/[FAIL]` 清单、help 文本）
+  load-config 导出行、perf JSON 报告、doctor `[OK]/[FAIL]` 清单、help 文本）
   保持纯 stdout 不进日志，供管道捕获。
 
 ### 4.2 生产 .env 派生（gen-env + dspark.env.json）
@@ -129,7 +129,7 @@ HEADLESS 注入 + `COMPOSE_DISABLE_ENV_FILE=1`）/ `container_exists_{local,remo
 ./deploy.sh --doctor                   # 部署前自检（FAIL=0 才可部署）
 ./deploy.sh --install [模型路径]         # 安装/覆盖安装（默认 common.default_model）
 ./deploy.sh --live_check                # API 健康检查
-./deploy.sh --chat_verify [目标tokens]   # 长上下文解码性能验证
+./deploy.sh --perf on|off [目标tokens]   # 长上下文性能测试
 ./deploy.sh --restart | --stop          # 重启 / 停止
 ./deploy.sh --uninstall                 # 清理部署
 

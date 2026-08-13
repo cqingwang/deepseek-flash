@@ -4,11 +4,11 @@
 #
 # 两种用法：
 #   A. 管理与部署（head 上执行，经 deploy.sh 转发）：
-#        install / uninstall / restart / live_check / chat_verify / doctor / help
+#        install / uninstall / restart / live_check / perf / doctor / help
 #   B. 部署后运行支撑（双机本机，systemd 单元 ExecStart 直调）：
 #        start / stop / ensure / status      —— 按本机 hostname 识别 head/worker 角色
 #   另含工具命令 load-config / gen-env（install 内部复用 + 调试导出）；
-#   chat_verify 为长上下文解码性能验证（原 scripts/longctx-verify.py，Issue #22）。
+#   perf 为长上下文解码性能验证（原 scripts/longctx-verify.py，Issue #22）。
 #
 # 参数 SSOT：config.yaml（common/head/worker 分类）。install 把本文件与 config.yaml
 #            部署到双机 /etc/dspark-vllm/；systemd 单元以绝对路径调用。
@@ -29,6 +29,7 @@ import socket
 import subprocess
 import sys
 import time
+from urllib.parse import urlsplit, urlunsplit
 
 
 # ---- 通用辅助（Fail-Fast） ----
@@ -60,12 +61,12 @@ def logtask(action, desc="", level=LogLevel.INFO):
     """统一日志：时间戳 + level + action[: desc]；ERROR 打印后退出应用（快速失败）。
 
     level 取 LogLevel.INFO / WARN / ERROR。过程日志统一走本函数；数据输出（.env 内容、
-    load-config 导出行、chat_verify JSON 报告、doctor 检查清单）不经过本函数，
+    load-config 导出行、perf JSON 报告、doctor 检查清单）不经过本函数，
     保持纯 stdout 供管道捕获。ERROR 调用后进程以非 0 退出。
     """
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] [{level}] {action}" + (f" — {desc}" if desc else "")
-    # 过程日志必须与 gen-env/load-config/chat_verify 等机器可读 stdout 分离。
+    # 过程日志必须与 gen-env/load-config/perf 等机器可读 stdout 分离。
     print(line, file=sys.stderr, flush=True)
     if level == LogLevel.ERROR:
         sys.exit(1)
@@ -89,6 +90,13 @@ def parser_constants(cfg):
     common, head, worker = cfg["common"], cfg["head"], cfg["worker"]
     repo = common["repo"]
     runtime_repo = common["runtime_repo"]
+    common_api = urlsplit(common["api_url"])
+    if not common_api.scheme or common_api.port is None:
+        logtask("config", "common.api_url 必须包含协议和端口，例如 http://127.0.0.1:8888/v1/models", level=LogLevel.ERROR)
+    management_ip = head["management_ip"].strip("[]")
+    perf_host = f"[{management_ip}]" if ":" in management_ip else management_ip
+    perf_api_url = urlunsplit((common_api.scheme, f"{perf_host}:{common_api.port}",
+                               common_api.path, common_api.query, common_api.fragment))
     return {
         "user": common["user"],
         "repo": repo,
@@ -101,6 +109,7 @@ def parser_constants(cfg):
         "image": common["vllm_image"],
         "image_tar": common.get("image_tar", ""),
         "api_url": common["api_url"],
+        "perf_api_url": perf_api_url,
         "api_key": common.get("api_key", ""),
         "env_file": f"{runtime_repo}/.env.dspark",
         "compose_file": f"{runtime_repo}/docker-compose.dspark.yml",
@@ -697,22 +706,29 @@ def cmd_live_check(consts, cfg, args):
     logtask("live_check", f"FAIL: {consts['api_url']}", level=LogLevel.ERROR)
 
 
-def cmd_chat_verify(consts, cfg, args):
-    """长上下文解码性能验证（原 scripts/longctx-verify.py，Issue #22）。
+def cmd_perf(consts, cfg, args):
+    """长上下文流式性能测试（原 scripts/longctx-verify.py，Issue #22）。
 
     构造 >=target tokens 的长 prompt 流式测速，按 decode tok/s(>=8) 判定
-    是否走快速 fp8 路径。BASE/MODEL 从 config 派生（api_url / default_model）。
+    是否走快速 fp8 路径；mode=on/off 显式控制 thinking。BASE/MODEL 从
+    config 派生（head.management_ip / common.api_url 端口 / default_model）。
     """
     import json
     import urllib.request
 
-    base = consts["api_url"][: consts["api_url"].rfind("/models")]
+    api_url = consts["perf_api_url"]
+    models_suffix = "/models"
+    if not api_url.endswith(models_suffix):
+        logtask("perf 的 API 地址必须以 /models 结尾", f"api={api_url}", level=LogLevel.ERROR)
+    base = api_url[:-len(models_suffix)]
     model = installed_model_name(consts)
     target = args.target
+    thinking_mode = args.mode
+    thinking_enabled = thinking_mode == "on"
     api_key = consts["api_key"]
     if target <= 0:
-        logtask("chat_verify 的目标 tokens 必须大于 0", level=LogLevel.ERROR)
-    logtask("chat_verify", f"长上下文解码性能验证（Issue #22）：构造长 prompt 流式测速，判定 fp8/bf16 路径；model={model} base={base} target={target} auth={'on' if api_key else 'off'}")
+        logtask("perf 的目标 tokens 必须大于 0", level=LogLevel.ERROR)
+    logtask("perf", f"长上下文性能测试（Issue #22）：thinking={thinking_mode}；构造长 prompt 流式测速，判定 fp8/bf16 路径；model={model} api={api_url} target={target} auth={'on' if api_key else 'off'}")
 
     def http_headers(api_key):
         headers = {"Content-Type": "application/json"}
@@ -735,16 +751,17 @@ def cmd_chat_verify(consts, cfg, args):
     text = "unique request longctx-verify " + unit * max(1, target // 3)
     while True:
         count = tokenize(text)
-        logtask("chat_verify", f"prompt tokens so far: {count}")
+        logtask("perf", f"prompt tokens so far: {count}")
         if count >= target:
             break
         text += unit * max(1, (target - count) // 3)
-    logtask("chat_verify", f"final prompt tokens: {count}")
+    logtask("perf", f"final prompt tokens: {count}")
 
     # ---- 流式请求 ----
     body = {"model": model,
             "messages": [{"role": "user", "content": text + "\nReply with exactly: VERIFIED"}],
             "max_tokens": 64, "temperature": 0.2,
+            "chat_template_kwargs": {"thinking": thinking_enabled},
             "stream": True, "stream_options": {"include_usage": True}}
     req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(),
                                  headers=http_headers(api_key))
@@ -761,21 +778,30 @@ def cmd_chat_verify(consts, cfg, args):
             d = ch[0].get("delta", {}) if ch else {}
             if first is None and (d.get("content") or d.get("reasoning") or d.get("reasoning_content")):
                 first = time.perf_counter()
-                logtask("chat_verify", f"TTFT: {first - started:.2f}s")
+                logtask("perf", f"TTFT: {first - started:.2f}s")
             if ev.get("usage"):
                 usage = ev["usage"]
     finished = time.perf_counter()
     pt = usage["prompt_tokens"] if usage else count
     ot = usage["completion_tokens"] if usage else 0
     decode_s = finished - (first or started)
+    ttft_s = (first or finished) - started
+    prefill_tok_s = pt / max(0.001, ttft_s)
+    decode_tok_s = ot / max(0.001, decode_s)
     print(json.dumps({
-        "prompt_tokens": pt,
-        "completion_tokens": ot,
-        "ttft_s": round((first or finished) - started, 2),
-        "prefill_tok_s": round(pt / max(0.001, (first or finished) - started), 1),
-        "decode_s": round(decode_s, 2),
-        "output_tok_s": round(ot / max(0.001, decode_s), 1),
-        "verdict": "FIX EFFECTIVE (fast fp8 path)" if ot / max(0.001, decode_s) >= 8 else "STILL SLOW (bf16 path)"
+        "test": "long_context_streaming_performance",
+        "thinking_mode": thinking_mode,
+        "thinking_enabled": thinking_enabled,
+        "api_url": api_url,
+        "model": model,
+        "target_prompt_tokens": target,
+        "measured_prompt_tokens": pt,
+        "generated_tokens": ot,
+        "time_to_first_token_seconds": round(ttft_s, 2),
+        "prefill_tokens_per_second": round(prefill_tok_s, 1),
+        "decode_seconds": round(decode_s, 2),
+        "decode_tokens_per_second": round(decode_tok_s, 1),
+        "verdict": "fast_fp8_path" if decode_tok_s >= 8 else "slow_bf16_path"
     }, indent=2))
     return 0
 
@@ -973,7 +999,7 @@ def cmd_help(consts=None, cfg=None, rest=None):
   restart                  重启集群（= stop + start）
   display off|on            设置双机默认终端/图形启动模式（重启后生效）
   live_check [--wait <秒>]  API 健康检查（--wait 轮询）
-  chat_verify [目标tokens]  长上下文解码性能验证（Issue #22，默认 620000）
+  perf on|off [目标tokens]  长上下文性能测试（on=思考，off=关闭思考；默认 620000）
   doctor [worker目标]       双机环境自检
 
 运行支撑（双机本机，systemd 单元直调）:
@@ -1022,7 +1048,8 @@ def build_parser():
     pm.add_argument("mode", choices=("off", "on"), help="off=终端模式，on=图形界面模式")
     pm = sub.add_parser("live_check", help="API 健康检查")
     pm.add_argument("--wait", type=non_negative_int, metavar="<秒>", help="轮询等待秒数（缺省一次检查）")
-    pm = sub.add_parser("chat_verify", help="长上下文解码性能验证（Issue #22）")
+    pm = sub.add_parser("perf", help="长上下文性能测试（Issue #22）")
+    pm.add_argument("mode", choices=("on", "off"), help="on=启用思考模式，off=关闭思考模式")
     pm.add_argument("target", nargs="?", type=positive_int, default=620000, metavar="<tokens>",
                    help="目标 prompt tokens（默认 620000）")
     pm = sub.add_parser("doctor", help="双机环境自检")
@@ -1058,7 +1085,7 @@ def main(argv):
         "restart": cmd_restart,
         "display": cmd_display,
         "live_check": cmd_live_check,
-        "chat_verify": cmd_chat_verify,
+        "perf": cmd_perf,
         "doctor": cmd_doctor,
         "start": cmd_start,
         "stop": cmd_stop,

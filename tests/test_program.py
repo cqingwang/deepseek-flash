@@ -15,6 +15,7 @@ class ContainerStateTests(unittest.TestCase):
             "worker_ssh": "chan@spark-b",
             "project": "deepseek-v4-flash",
             "api_url": "http://127.0.0.1:8888/v1/models",
+            "perf_api_url": "http://192.168.2.180:8888/v1/models",
             "repo": "/opt/deepseek-flash",
             "runtime_repo": "/opt/deepseek-flash/dspark",
             "compose_file": "/opt/deepseek-flash/dspark/docker-compose.dspark.yml",
@@ -186,9 +187,15 @@ class CliValidationTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             program.build_parser().parse_args(["live_check", "--wait", "-1"])
 
-    def test_chat_verify_rejects_zero_target(self):
+    def test_perf_requires_thinking_mode_and_rejects_zero_target(self):
+        args = program.build_parser().parse_args(["perf", "on", "10"])
+        self.assertEqual(args.mode, "on")
+        self.assertEqual(args.target, 10)
+        self.assertEqual(program.build_parser().parse_args(["perf", "off"]).mode, "off")
         with self.assertRaises(SystemExit):
-            program.build_parser().parse_args(["chat_verify", "0"])
+            program.build_parser().parse_args(["perf", "0"])
+        with self.assertRaises(SystemExit):
+            program.build_parser().parse_args(["perf", "on", "0"])
 
     def test_positive_and_non_negative_types(self):
         self.assertEqual(program.positive_int("1"), 1)
@@ -250,13 +257,14 @@ class ConfigurationBehaviorTests(unittest.TestCase):
                 "vllm_image": "image:tag",
                 "api_url": "http://127.0.0.1:8888/v1/models",
             },
-            "head": {"hostname": "head", "fabric_ip": "10.0.0.1"},
+            "head": {"hostname": "head", "management_ip": "192.168.2.180", "fabric_ip": "10.0.0.1"},
             "worker": {"hostname": "worker", "ssh": "chan@worker"},
         }
         consts = program.parser_constants(cfg)
         self.assertEqual(consts["runtime_repo"], "/opt/deepseek-flash/dspark")
         self.assertEqual(consts["env_file"], "/opt/deepseek-flash/dspark/.env.dspark")
         self.assertEqual(consts["compose_file"], "/opt/deepseek-flash/dspark/docker-compose.dspark.yml")
+        self.assertEqual(consts["perf_api_url"], "http://192.168.2.180:8888/v1/models")
 
     def test_resolve_model_uses_configured_model_root(self):
         consts = {
@@ -409,7 +417,7 @@ class ModelLinkLayoutTests(unittest.TestCase):
 class ApiKeyTests(unittest.TestCase):
     """HTTP 鉴权（config.common.api_key → .env.dspark VLLM_API_KEY → vLLM --api-key）。
 
-    缺陷驱动契约（回归防护）：若 gen_env 不注入 VLLM_API_KEY、或 chat_verify 请求头
+    缺陷驱动契约（回归防护）：若 gen_env 不注入 VLLM_API_KEY、或 perf 请求头
     缺失 Authorization Bearer，下列断言必然失败，标志鉴权对接回归。
     """
 
@@ -431,6 +439,7 @@ class ApiKeyTests(unittest.TestCase):
         self.k = {
             "api_url": self.cfg["common"]["api_url"],
             "api_key": self.cfg["common"]["api_key"],
+            "perf_api_url": "http://192.168.2.180:8888/v1/models",
             "env_file": "/opt/deepseek-flash/dspark/.env.dspark",
         }
 
@@ -459,7 +468,7 @@ class ApiKeyTests(unittest.TestCase):
         )
 
     @mock.patch("program.installed_model_name", return_value="deepseek-v4-flash-0731")
-    def test_chat_verify_sends_authorization_bearer_with_key(self, _model):
+    def test_perf_sends_authorization_bearer_with_key(self, _model):
         import urllib.request
 
         request_args = []
@@ -471,11 +480,63 @@ class ApiKeyTests(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen), \
              mock.patch("program.logtask", side_effect=lambda *a, **k: None):
             try:
-                program.cmd_chat_verify(self.k, self.cfg, argparse.Namespace(target=10))
+                program.cmd_perf(self.k, self.cfg, argparse.Namespace(mode="off", target=10))
             except urllib.error.HTTPError:
                 pass
         self.assertTrue(request_args)
         self.assertEqual(request_args[0].get_header("Authorization"), "Bearer deepseek")
+        self.assertEqual(request_args[0].full_url, "http://192.168.2.180:8888/tokenize")
+
+    @mock.patch("program.installed_model_name", return_value="deepseek-v4-flash-0731")
+    def test_perf_request_sets_thinking_mode_explicitly(self, _model):
+        import io
+        import json
+
+        class FakeResponse:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return self.payload
+
+            def __iter__(self):
+                return iter(self.payload.splitlines(keepends=True))
+
+        requests = []
+        responses = [
+            FakeResponse(b'{"count": 10}'),
+            FakeResponse(
+                b'data: {"choices":[{"delta":{"content":"VERIFIED"}}]}\n'
+                b'data: {"usage":{"prompt_tokens":10,"completion_tokens":1}}\n'
+                b'data: [DONE]\n'
+            ),
+        ]
+
+        def fake_urlopen(request, timeout=3600):
+            requests.append((request, timeout))
+            return responses.pop(0)
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             mock.patch("program.logtask", side_effect=lambda *a, **k: None), \
+             mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            self.assertEqual(
+                program.cmd_perf(self.k, self.cfg, argparse.Namespace(mode="on", target=10)),
+                0,
+            )
+
+        stream_body = json.loads(requests[1][0].data)
+        self.assertEqual(requests[0][0].full_url, "http://192.168.2.180:8888/tokenize")
+        self.assertEqual(requests[1][0].full_url, "http://192.168.2.180:8888/v1/chat/completions")
+        self.assertEqual(stream_body["chat_template_kwargs"], {"thinking": True})
+        report = json.loads(stdout.getvalue())
+        self.assertEqual(report["thinking_mode"], "on")
+        self.assertEqual(report["generated_tokens"], 1)
 
     def test_parser_constants_exposes_api_key(self):
         cfg = {
@@ -488,7 +549,7 @@ class ApiKeyTests(unittest.TestCase):
                 "vllm_image": "img", "api_url": "http://127.0.0.1:8888/v1/models",
                 "master_port": 25000, "api_key": "deepseek",
             },
-            "head": {"hostname": "spark-a", "fabric_ip": "10.100.240.1"},
+            "head": {"hostname": "spark-a", "management_ip": "192.168.2.180", "fabric_ip": "10.100.240.1"},
             "worker": {"hostname": "spark-b", "ssh": "chan@spark-b"},
         }
         self.assertEqual(program.parser_constants(cfg)["api_key"], "deepseek")
