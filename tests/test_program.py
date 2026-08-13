@@ -510,10 +510,16 @@ class ApiKeyTests(unittest.TestCase):
 
         requests = []
         responses = [
-            FakeResponse(b'{"count": 10}'),
+            FakeResponse(b'{"count": 9000}'),
             FakeResponse(
                 b'data: {"choices":[{"delta":{"content":"VERIFIED"}}]}\n'
-                b'data: {"usage":{"prompt_tokens":10,"completion_tokens":1}}\n'
+                b'data: {"usage":{"prompt_tokens":8299,"completion_tokens":128}}\n'
+                b'data: [DONE]\n'
+            ),
+            FakeResponse(b'{"count": 620000}'),
+            FakeResponse(
+                b'data: {"choices":[{"delta":{"content":"VERIFIED"}}]}\n'
+                b'data: {"usage":{"prompt_tokens":620000,"completion_tokens":128}}\n'
                 b'data: [DONE]\n'
             ),
         ]
@@ -536,7 +542,10 @@ class ApiKeyTests(unittest.TestCase):
         self.assertEqual(stream_body["chat_template_kwargs"], {"thinking": True})
         report = json.loads(stdout.getvalue())
         self.assertEqual(report["thinking_mode"], "on")
-        self.assertEqual(report["generated_tokens"], 1)
+        self.assertEqual(report["cases"][0]["case"], "short_context_baseline")
+        self.assertEqual(report["cases"][1]["case"], "long_context_issue22")
+        self.assertEqual(report["cases"][1]["generated_tokens"], 128)
+        self.assertEqual(report["verdict"], "pass")
 
     def test_parser_constants_exposes_api_key(self):
         cfg = {

@@ -81,7 +81,7 @@
 ./deploy.sh --display off          # 双机默认终端模式（重启后生效，节省图形界面资源）
 ./deploy.sh --display on           # 双机默认图形界面模式（重启后生效）
 ./deploy.sh --live_check          # API 健康检查
-./deploy.sh --perf on|off [tokens]  # 长上下文性能测试（on=思考，off=关闭思考；默认 620000）
+./deploy.sh --perf on|off [tokens]  # README 性能验收：8.3k 基线 + 长上下文（默认 620000）
 ./deploy.sh --doctor [worker]     # 双机环境自检（SSH/GPU/CUDA/镜像/模型/RoCE/端口，FAIL=0 才可部署）
 ./deploy.sh --help                # 帮助
 ```
@@ -163,7 +163,7 @@ systemd target，不会切换当前 target，也不会停止正在运行的 DSpa
 ```bash
 ./deploy.sh status                               # 双机容器与 API 状态
 ./deploy.sh --live_check                         # API 健康检查（--wait <秒> 可轮询等待）
-./deploy.sh --perf on|off [tokens]               # 长上下文性能测试（换模型后建议跑；默认 620000）
+./deploy.sh --perf on|off [tokens]               # 性能验收：8.3k 基线 + 长上下文（默认 620000）
 ```
 
 ## 五、目录结构

@@ -98,7 +98,9 @@ KV 池是共享的：总在线 token ≤ ~2.3M，长上下文与高并发互斥�
 
 > 94baabf 起，start 脚本自动应用 Issue #22 hotfix：`nvfp4_ds_mla` 在 600K+ 上下文时不再走
 > 慢速 bf16 kernel（~1.0 tok/s），改走快速 fp8 kernel。验证方法：`/tokenize` 校准 prompt 到目标
-> 长度后流式请求，测 TTFT 与 decode tok/s（执行 `./deploy.sh --perf on|off [目标tokens]`）；性能测试会从 `config.yaml` 的 `head.management_ip` 访问 API，因此可在 Mac 上执行。
+> `./deploy.sh --perf on|off [目标tokens]` 会自动执行 8,299 tokens 短上下文基线和目标长上下文两组测试，每组持续生成 128 tokens；性能测试会从 `config.yaml` 的 `head.management_ip` 访问 API，因此可在 Mac 上执行。
+
+验收门槛：每组至少生成 128 tokens，单流 decode 至少 60 tok/s。README 的参考区间是约 60–80 tok/s；TTFT/prefill 单独记录，不用冷启动或长上下文 TTFT 判定是否达标。长上下文 prompt 会分段增长并对临时 tokenizer 断线自动重试，避免一次性提交数 MB 请求体。长上下文 `target` 默认 620,000，可用 `780000` 复现第二个长上下文锚点。
 
 | 测试 | prompt tokens | TTFT | prefill tok/s | decode tok/s |
 |---|---|---|---|---|

@@ -707,13 +707,9 @@ def cmd_live_check(consts, cfg, args):
 
 
 def cmd_perf(consts, cfg, args):
-    """长上下文流式性能测试（原 scripts/longctx-verify.py，Issue #22）。
-
-    构造 >=target tokens 的长 prompt 流式测速，按 decode tok/s(>=8) 判定
-    是否走快速 fp8 路径；mode=on/off 显式控制 thinking。BASE/MODEL 从
-    config 派生（head.management_ip / common.api_url 端口 / default_model）。
-    """
+    """按 README 验收锚点执行短上下文和长上下文单流性能测试。"""
     import json
+    import urllib.error
     import urllib.request
 
     api_url = consts["perf_api_url"]
@@ -728,7 +724,10 @@ def cmd_perf(consts, cfg, args):
     api_key = consts["api_key"]
     if target <= 0:
         logtask("perf 的目标 tokens 必须大于 0", level=LogLevel.ERROR)
-    logtask("perf", f"长上下文性能测试（Issue #22）：thinking={thinking_mode}；构造长 prompt 流式测速，判定 fp8/bf16 路径；model={model} api={api_url} target={target} auth={'on' if api_key else 'off'}")
+    short_target = 8299
+    output_target = 128
+    minimum_decode_tok_s = 60.0
+    logtask("perf", f"README 单流性能验收：thinking={thinking_mode}；短上下文={short_target} tokens；长上下文={target} tokens；持续输出={output_target} tokens；model={model} api={api_url} auth={'on' if api_key else 'off'}")
 
     def http_headers(api_key):
         headers = {"Content-Type": "application/json"}
@@ -737,73 +736,100 @@ def cmd_perf(consts, cfg, args):
         return headers
 
     def request_json(url, body, timeout=3600):
-        req = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                     headers=http_headers(api_key))
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.load(r)
+        payload = json.dumps(body).encode()
+        for attempt in range(3):
+            req = urllib.request.Request(url, data=payload, headers=http_headers(api_key))
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    return json.load(r)
+            except (urllib.error.URLError, BrokenPipeError) as exc:
+                if attempt == 2:
+                    raise
+                logtask("perf", f"tokenizer 请求暂时断开，第 {attempt + 1}/3 次重试：{exc}", level=LogLevel.WARN)
+                time.sleep(2 ** attempt)
 
     def tokenize(prompt):
         return request_json(base.replace("/v1", "") + "/tokenize",
                             {"model": model, "prompt": prompt})["count"]
 
-    # ---- 构造到目标长度的长 prompt ----
-    unit = "benchmark context datum "
-    text = "unique request longctx-verify " + unit * max(1, target // 3)
-    while True:
-        count = tokenize(text)
-        logtask("perf", f"prompt tokens so far: {count}")
-        if count >= target:
-            break
-        text += unit * max(1, (target - count) // 3)
-    logtask("perf", f"final prompt tokens: {count}")
+    def build_prompt(target_tokens, label):
+        unit = "benchmark context datum "
+        # tokenizer 服务可能拒绝数 MB 的单次 POST；分段增长也能把断线重试限制在小请求。
+        text = f"unique request {label} "
+        current_count = 0
+        while True:
+            count = tokenize(text)
+            logtask("perf", f"{label}: prompt tokens so far: {count}")
+            if count >= target_tokens:
+                return text, count
+            remaining = target_tokens - count
+            growth_tokens = min(32768, max(1024, remaining // 2))
+            text += unit * growth_tokens
+            if count <= current_count:
+                logtask("perf", f"{label}: tokenizer token count did not increase ({count})", level=LogLevel.ERROR)
+            current_count = count
 
-    # ---- 流式请求 ----
-    body = {"model": model,
-            "messages": [{"role": "user", "content": text + "\nReply with exactly: VERIFIED"}],
-            "max_tokens": 64, "temperature": 0.2,
-            "chat_template_kwargs": {"thinking": thinking_enabled},
-            "stream": True, "stream_options": {"include_usage": True}}
-    req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(),
-                                 headers=http_headers(api_key))
-    started = time.perf_counter()
-    first = None
-    usage = None
-    with urllib.request.urlopen(req, timeout=3600) as r:
-        for raw in r:
-            line = raw.decode().strip()
-            if not line.startswith("data: ") or line == "data: [DONE]":
-                continue
-            ev = json.loads(line[6:])
-            ch = ev.get("choices") or []
-            d = ch[0].get("delta", {}) if ch else {}
-            if first is None and (d.get("content") or d.get("reasoning") or d.get("reasoning_content")):
-                first = time.perf_counter()
-                logtask("perf", f"TTFT: {first - started:.2f}s")
-            if ev.get("usage"):
-                usage = ev["usage"]
-    finished = time.perf_counter()
-    pt = usage["prompt_tokens"] if usage else count
-    ot = usage["completion_tokens"] if usage else 0
-    decode_s = finished - (first or started)
-    ttft_s = (first or finished) - started
-    prefill_tok_s = pt / max(0.001, ttft_s)
-    decode_tok_s = ot / max(0.001, decode_s)
+    def run_stream_case(label, target_tokens):
+        text, calibrated_tokens = build_prompt(target_tokens, label)
+        instruction = "\nReturn exactly 128 numbered lowercase English words, then stop."
+        body = {"model": model,
+                "messages": [{"role": "user", "content": text + instruction}],
+                "max_tokens": 512, "temperature": 0.6, "top_p": 0.95,
+                "chat_template_kwargs": {"thinking": thinking_enabled},
+                "stream": True, "stream_options": {"include_usage": True}}
+        req = urllib.request.Request(base + "/chat/completions", data=json.dumps(body).encode(),
+                                     headers=http_headers(api_key))
+        started = time.perf_counter()
+        first = None
+        usage = None
+        with urllib.request.urlopen(req, timeout=3600) as response:
+            for raw in response:
+                line = raw.decode().strip()
+                if not line.startswith("data: ") or line == "data: [DONE]":
+                    continue
+                event = json.loads(line[6:])
+                choices = event.get("choices") or []
+                delta = choices[0].get("delta", {}) if choices else {}
+                if first is None and (delta.get("content") or delta.get("reasoning") or delta.get("reasoning_content")):
+                    first = time.perf_counter()
+                    logtask("perf", f"{label}: TTFT={first - started:.2f}s")
+                if event.get("usage"):
+                    usage = event["usage"]
+        finished = time.perf_counter()
+        prompt_tokens = usage["prompt_tokens"] if usage else calibrated_tokens
+        generated_tokens = usage["completion_tokens"] if usage else 0
+        ttft_s = (first or finished) - started
+        decode_s = finished - (first or started)
+        prefill_tok_s = prompt_tokens / max(0.001, ttft_s)
+        decode_tok_s = generated_tokens / max(0.001, decode_s)
+        return {
+            "case": label,
+            "target_prompt_tokens": target_tokens,
+            "measured_prompt_tokens": prompt_tokens,
+            "generated_tokens": generated_tokens,
+            "time_to_first_token_seconds": round(ttft_s, 2),
+            "prefill_tokens_per_second": round(prefill_tok_s, 1),
+            "decode_seconds": round(decode_s, 2),
+            "decode_tokens_per_second": round(decode_tok_s, 1),
+            "minimum_expected_decode_tokens_per_second": minimum_decode_tok_s,
+            "verdict": "pass" if generated_tokens >= output_target and decode_tok_s >= minimum_decode_tok_s else "fail",
+        }
+
+    cases = [run_stream_case("short_context_baseline", short_target),
+             run_stream_case("long_context_issue22", target)]
+    passed = all(item["verdict"] == "pass" for item in cases)
     print(json.dumps({
-        "test": "long_context_streaming_performance",
+        "test": "readme_single_stream_performance_acceptance",
         "thinking_mode": thinking_mode,
         "thinking_enabled": thinking_enabled,
         "api_url": api_url,
         "model": model,
-        "target_prompt_tokens": target,
-        "measured_prompt_tokens": pt,
-        "generated_tokens": ot,
-        "time_to_first_token_seconds": round(ttft_s, 2),
-        "prefill_tokens_per_second": round(prefill_tok_s, 1),
-        "decode_seconds": round(decode_s, 2),
-        "decode_tokens_per_second": round(decode_tok_s, 1),
-        "verdict": "fast_fp8_path" if decode_tok_s >= 8 else "slow_bf16_path"
+        "expected_decode_range": "60-80 tok/s",
+        "required_generated_tokens": output_target,
+        "cases": cases,
+        "verdict": "pass" if passed else "fail",
     }, indent=2))
-    return 0
+    return 0 if passed else 1
 
 
 # ---- doctor 命令（head 上） ----

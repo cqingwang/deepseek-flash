@@ -73,7 +73,7 @@ docs/                 分章节教程（07 部署 / 08 验证 / 09 运维 / 10 �
 | | `uninstall` | stop → 移除双机模型 symlink → 禁用 systemd 自启 |
 | | `restart` | = stop + start（head 上） |
 | | `live_check [--wait 秒]` | curl `common.api_url` 健康检查；--wait 轮询（install 内部复用） |
-| | `perf on|off [目标tokens]` | 长上下文性能测试（Issue #22；on=思考，off=关闭思考，默认 620000；从 `head.management_ip` 访问 API） |
+| | `perf on|off [目标tokens]` | README 性能验收：8.3k 短上下文基线 + Issue #22 长上下文；持续生成 128 tokens，默认长上下文 620000；从 `head.management_ip` 访问 API |
 | 自检（head） | `doctor [worker目标]` | 双机环境自检：SSH/GPU/CUDA/镜像/runtime repo/模型/RoCE/端口，FAIL 计数决定退出码 |
 | 运行支撑（双机，systemd 直调） | `start` / `stop` | 仅 head（角色校验） |
 | | `ensure` | 仅 worker（容器守护） |
@@ -129,7 +129,7 @@ HEADLESS 注入 + `COMPOSE_DISABLE_ENV_FILE=1`）/ `container_exists_{local,remo
 ./deploy.sh --doctor                   # 部署前自检（FAIL=0 才可部署）
 ./deploy.sh --install [模型路径]         # 安装/覆盖安装（默认 common.default_model）
 ./deploy.sh --live_check                # API 健康检查
-./deploy.sh --perf on|off [目标tokens]   # 长上下文性能测试
+./deploy.sh --perf on|off [目标tokens]   # README 性能验收：短上下文基线 + 长上下文
 ./deploy.sh --restart | --stop          # 重启 / 停止
 ./deploy.sh --uninstall                 # 清理部署
 
