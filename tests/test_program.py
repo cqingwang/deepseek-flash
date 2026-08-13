@@ -446,6 +446,18 @@ class ApiKeyTests(unittest.TestCase):
                               template={"VLLM_API_KEY": None})
         self.assertIn("VLLM_API_KEY=", env)
 
+    @mock.patch("program.dotask")
+    def test_api_healthy_sends_authorization_bearer_with_key(self, dotask):
+        dotask.return_value = subprocess.CompletedProcess(["curl"], 0, stdout="", stderr="")
+
+        self.assertTrue(program.api_healthy(self.k))
+
+        self.assertEqual(dotask.call_args.args[0], "curl -fsS --max-time 5")
+        self.assertEqual(
+            dotask.call_args.args[1],
+            ["-H", "Authorization: Bearer deepseek", self.k["api_url"]],
+        )
+
     @mock.patch("program.installed_model_name", return_value="deepseek-v4-flash-0731")
     def test_chat_verify_sends_authorization_bearer_with_key(self, _model):
         import urllib.request

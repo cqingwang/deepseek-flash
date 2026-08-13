@@ -149,9 +149,13 @@ def drop_privilege(consts, argv):
 
 
 def api_healthy(consts):
-    """vLLM API 健康探测（curl common.api_url）。"""
+    """vLLM API 健康探测；启用鉴权时携带 Bearer token。"""
     try:
-        dotask("curl -fsS --max-time 5", [consts["api_url"]],
+        curl_args = []
+        if consts.get("api_key"):
+            curl_args.extend(["-H", f"Authorization: Bearer {consts['api_key']}"])
+        curl_args.append(consts["api_url"])
+        dotask("curl -fsS --max-time 5", curl_args,
                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         return True
     except (subprocess.CalledProcessError, OSError):
@@ -163,10 +167,12 @@ def wait_for_api(consts, attempts=240, sec=5, timeout=None):
     deadline = time.monotonic() + timeout if timeout is not None else None
     description = f"最长 {timeout}s" if timeout is not None else f"最长 {attempts}x{sec}s"
     logtask("wait_for_api", f"等待 vLLM API（{description}）")
-    for _ in range(attempts):
+    for attempt in range(1, attempts + 1):
         if api_healthy(consts):
             logtask("wait_for_api", "API 已健康")
             return True
+        if attempt == 1 or attempt % 12 == 0:
+            logtask("wait_for_api", f"API 尚未就绪（第 {attempt}/{attempts} 次，地址={consts['api_url']}）")
         if deadline is not None:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -648,8 +654,8 @@ def cmd_install(consts, cfg, args):
     link_model(consts, model_dir)
     install_env(consts, cfg, model_dir)
     cmd_start(consts, cfg, [])
-    if not wait_for_api(consts):
-        logtask("install 完成但 API 未就绪", level=LogLevel.ERROR)
+    # 上游 start 脚本自身已等待 /v1/models 并执行最小 chat；这里不要再
+    # 无条件重复轮询，否则 API 已成功时仍会因鉴权或网络瞬态被等满 20 分钟。
     activate_units(consts)
     logtask("install", "完成")
     return 0
