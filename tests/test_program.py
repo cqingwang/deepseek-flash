@@ -488,6 +488,17 @@ class ApiKeyTests(unittest.TestCase):
         ).read_text()
         self.assertIn('sparse MLA autotune now covers 1/2/4 request shapes', hotfix)
 
+    def test_start_script_authenticates_api_probes_and_fails_strict_hotfix(self):
+        start = Path(__file__).parents[1].joinpath(
+            "dspark", "start-deepseek-v4-flash-dspark.sh"
+        ).read_text()
+        self.assertIn('Authorization: Bearer ${VLLM_API_KEY}', start)
+        self.assertIn('if api_curl "$API_URL"', start)
+        self.assertIn('api_curl "$CHAT_URL"', start)
+        self.assertIn('docker exec "${PROJECT_NAME}-vllm-dspark-1" bash "/tmp/$_hf"', start)
+        self.assertIn('docker exec "${PROJECT_NAME}-vllm-dspark-1" bash "/tmp/$_hf" || true', start)
+        self.assertIn('if [ "$_hf" = "hotfix-dsv4-sparse-mla-autotune-shapes.sh" ]; then', start)
+
 
 if __name__ == "__main__":
     unittest.main()
