@@ -121,6 +121,22 @@ class ContainerStateTests(unittest.TestCase):
             program.cmd_stop(self.k, {}, [])
         dotask.assert_not_called()
 
+    @mock.patch("program.container_running_remote", return_value=False)
+    @mock.patch("program.dotask")
+    @mock.patch("program.os.access", return_value=True)
+    @mock.patch("program.node_role", return_value="head")
+    def test_stop_injects_worker_host_from_config_when_runtime_env_is_missing(
+        self, _role, _executable, dotask, _worker_running
+    ):
+        dotask.return_value = subprocess.CompletedProcess(["stop"], 0, stdout="", stderr="")
+        cfg = {"worker": {"management_ip": "192.168.2.180"}}
+
+        self.assertEqual(program.cmd_stop(self.k, cfg, []), 0)
+
+        stop_call = dotask.call_args_list[0]
+        self.assertEqual(stop_call.kwargs["env"]["WORKER_HOST"], "192.168.2.180")
+        self.assertEqual(stop_call.kwargs["cwd"], self.k["runtime_repo"])
+
     @mock.patch("program.cmd_start", return_value=0)
     @mock.patch("program.cmd_stop")
     def test_restart_forwards_config_to_nested_commands(self, stop, start):

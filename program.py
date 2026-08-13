@@ -428,8 +428,13 @@ def cmd_stop(consts, cfg, rest):
     stop_script = runtime_repo_files(consts)["stop"]
     if not os.access(stop_script, os.X_OK):
         logtask(f"缺少可执行的 {stop_script}", level=LogLevel.ERROR)
+    # install 在 stop 之后才生成 runtime .env.dspark；旧容器存在但该文件
+    # 尚未生成时，仍必须能从 config.yaml 提供 stop 脚本所需的 worker 地址。
+    stop_env = os.environ.copy()
+    stop_env["WORKER_HOST"] = cfg["worker"]["management_ip"]
     try:
-        dotask(stop_script, cwd=consts["runtime_repo"], stdout=None, stderr=None, check=True)
+        dotask(stop_script, cwd=consts["runtime_repo"], env=stop_env,
+               stdout=None, stderr=None, check=True)
     except subprocess.CalledProcessError as exc:
         logtask("stop", f"上游 DSpark 停止脚本失败（exit={exc.returncode}）：{stop_script}", level=LogLevel.ERROR)
     # 兜底：worker 容器若仍存活
