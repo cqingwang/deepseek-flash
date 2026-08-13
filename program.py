@@ -20,6 +20,7 @@
 # =============================================================================
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import pwd
@@ -100,7 +101,7 @@ def parser_constants(cfg):
         "image": common["vllm_image"],
         "image_tar": common.get("image_tar", ""),
         "api_url": common["api_url"],
-        "vllm_api_key": common.get("vllm_api_key", ""),
+        "api_key": common.get("api_key", ""),
         "env_file": f"{runtime_repo}/.env.dspark",
         "compose_file": f"{runtime_repo}/docker-compose.dspark.yml",
         "head_hostname": head["hostname"],
@@ -216,6 +217,34 @@ def runtime_repo_files(consts):
     }
 
 
+def runtime_source_drift(consts):
+    """检查仓库内 dspark runtime 与实际执行目录是否一致，只告警不自动覆盖。"""
+    source_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dspark")
+    runtime_files = runtime_repo_files(consts)
+    source_files = {
+        "start": os.path.join(source_root, os.path.basename(runtime_files["start"])),
+        "compose": os.path.join(source_root, os.path.basename(runtime_files["compose"])),
+    }
+
+    def digest(path):
+        try:
+            checksum = hashlib.sha256()
+            with open(path, "rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    checksum.update(block)
+            return checksum.hexdigest()
+        except OSError:
+            return None
+
+    for key, source_path in source_files.items():
+        source_hash = digest(source_path)
+        runtime_hash = digest(runtime_files[key])
+        if source_hash and runtime_hash and source_hash != runtime_hash:
+            logtask("runtime_drift", f"本地 dspark/{os.path.basename(source_path)} 与实际 runtime {runtime_files[key]} 内容不同；install 不会自动同步 dspark/，将执行 runtime 版本", level=LogLevel.WARN)
+        elif source_hash is None:
+            logtask("runtime_drift", f"本地 runtime 源文件不存在，无法比较: {source_path}", level=LogLevel.WARN)
+
+
 def model_required_files(model_dir):
     """DOWNLOADS.md 第 7 项要求的模型关键文件与 48 个权重分片。"""
     required = [
@@ -328,7 +357,7 @@ def gen_env(cfg, model_dir, template=None):
     d = dict(template)
     d.update({
         # ---- HTTP 鉴权（config 派生；空串 = 不启用） ----
-        "VLLM_API_KEY": common.get("vllm_api_key", ""),
+        "VLLM_API_KEY": common.get("api_key", ""),
         # ---- 集群（config 派生） ----
         "WORKER_HOST": worker["management_ip"],
         "MASTER_ADDR": head["fabric_ip"],
@@ -601,6 +630,7 @@ def cmd_install(consts, cfg, args):
     if not os.path.isfile(f"{model_dir}/config.json"):
         logtask(f"{model_dir}/config.json 不存在（检查模型目录）", level=LogLevel.ERROR)
     validate_runtime_repo(consts, consts["worker_ssh"])
+    runtime_source_drift(consts)
     deploy_ops(consts, cfg)
     deploy_units(consts)
     if container_exists_local(consts) or container_exists_remote(consts):
@@ -668,7 +698,7 @@ def cmd_chat_verify(consts, cfg, args):
     base = consts["api_url"][: consts["api_url"].rfind("/models")]
     model = installed_model_name(consts)
     target = args.target
-    api_key = consts["vllm_api_key"]
+    api_key = consts["api_key"]
     if target <= 0:
         logtask("chat_verify 的目标 tokens 必须大于 0", level=LogLevel.ERROR)
     logtask("chat_verify", f"长上下文解码性能验证（Issue #22）：构造长 prompt 流式测速，判定 fp8/bf16 路径；model={model} base={base} target={target} auth={'on' if api_key else 'off'}")
