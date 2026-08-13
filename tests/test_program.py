@@ -471,6 +471,23 @@ class ApiKeyTests(unittest.TestCase):
         self.assertIn('VLLM_API_KEY_ARGS=(--api-key "$${VLLM_API_KEY}")', compose)
         self.assertIn('"$${VLLM_API_KEY_ARGS[@]}"', compose)
 
+    def test_compose_uses_supported_performance_paths_explicitly(self):
+        compose = Path(__file__).parents[1].joinpath("dspark", "docker-compose.dspark.yml").read_text()
+        self.assertIn('VLLM_ALLREDUCE_USE_SYMM_MEM: "${VLLM_ALLREDUCE_USE_SYMM_MEM:-0}"', compose)
+        self.assertIn('VLLM_USE_NCCL_SYMM_MEM: "${VLLM_USE_NCCL_SYMM_MEM:-0}"', compose)
+        self.assertIn('if (( CUDAGRAPH_CAPTURE_SIZE > 32 )); then CUDAGRAPH_CAPTURE_SIZE=32; fi;', compose)
+        self.assertIn('--max-cudagraph-capture-size $${CUDAGRAPH_CAPTURE_SIZE}', compose)
+
+    def test_sparse_mla_autotune_covers_two_request_decode_shape(self):
+        warmup = Path(__file__).parents[1].joinpath(
+            "dspark", "recipe", "overlay", "vllm", "model_executor", "warmup", "kernel_warmup.py"
+        ).read_text()
+        self.assertIn('min(max_num_seqs, 2)', warmup)
+        hotfix = Path(__file__).parents[1].joinpath(
+            "dspark", "patches", "hotfix-dsv4-sparse-mla-autotune-shapes.sh"
+        ).read_text()
+        self.assertIn('sparse MLA autotune now covers 1/2/4 request shapes', hotfix)
+
 
 if __name__ == "__main__":
     unittest.main()
