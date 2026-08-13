@@ -1,5 +1,8 @@
 import argparse
+import json
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -175,6 +178,37 @@ class CliValidationTests(unittest.TestCase):
     def test_doctor_command_parses(self):
         parser = program.build_parser()
         self.assertEqual(parser.parse_args(["doctor"]).command, "doctor")
+
+    def test_fetch_requires_model_repo_id(self):
+        parser = program.build_parser()
+        args = parser.parse_args(["fetch", "deepseek-ai/DeepSeek-V4-Flash-0731"])
+        self.assertEqual(args.command, "fetch")
+        self.assertEqual(args.model, "deepseek-ai/DeepSeek-V4-Flash-0731")
+        with self.assertRaises(SystemExit):
+            parser.parse_args(["fetch"])
+
+    def test_fetch_downloads_to_configured_model_library(self):
+        with tempfile.TemporaryDirectory() as model_lib:
+            consts = {"model_lib": model_lib}
+            args = argparse.Namespace(model="org/variant")
+            def run_download(_cmd, command_args, **_kwargs):
+                destination = command_args[command_args.index("--destination") + 1]
+                Path(destination, "config.json").parent.mkdir(parents=True, exist_ok=True)
+                Path(destination, "config.json").write_text("{}", encoding="utf-8")
+
+            with mock.patch("program.dotask", side_effect=run_download) as dotask:
+                self.assertEqual(program.cmd_fetch(consts, {}, args), 0)
+
+            command = dotask.call_args.args[1]
+            self.assertEqual(command[command.index("--repo-id") + 1], "org/variant")
+            self.assertEqual(command[command.index("--destination") + 1], str(Path(model_lib, "org", "variant")))
+            self.assertEqual(command[command.index("--endpoint") + 1], "https://hf-mirror.com")
+
+    def test_fetch_rejects_nested_or_traversal_repo_ids(self):
+        consts = {"model_lib": "/tmp/models"}
+        for model_id in ("org/nested/variant", "../variant", "org/../variant"):
+            with self.subTest(model_id=model_id), self.assertRaises(SystemExit):
+                program.resolve_fetch_target(consts, model_id)
 
     def test_display_command_accepts_only_on_or_off(self):
         parser = program.build_parser()
@@ -399,6 +433,15 @@ class ModelLinkLayoutTests(unittest.TestCase):
             "DSPARK_MODEL_OFFICIAL=/cache/huggingface/models/DeepSeek-V4-Flash-0731", env)
         self.assertIn(
             "DSPARK_ENCODING_FILE=/cache/huggingface/models/DeepSeek-V4-Flash-0731/encoding/encoding_dsv4.py", env)
+
+    def test_install_defaults_use_600k_context_and_four_sequences(self):
+        with open("dspark.env.json", encoding="utf-8") as stream:
+            template = json.load(stream)
+        self.assertEqual(template["MAX_MODEL_LEN"], "600000")
+        self.assertEqual(template["MAX_NUM_SEQS"], "4")
+        compose = Path("dspark/docker-compose.dspark.yml").read_text(encoding="utf-8")
+        self.assertIn("--max-model-len ${MAX_MODEL_LEN:-600000}", compose)
+        self.assertIn("--max-num-seqs ${MAX_NUM_SEQS:-4}", compose)
 
     @mock.patch("program.ssh_task")
     @mock.patch("program.dotask")

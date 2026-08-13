@@ -98,7 +98,7 @@ Resolved architecture: DeepseekV4ForCausalLM
 Using nvfp4_ds_mla data type to store kv cache
 Loading weights took 222.99 seconds        # 每 rank 79.17 GiB
 Available KV cache memory: 17.02 GiB (head) / 16.64 GiB (worker)   # 双机合计 ≈33.7 GiB（≈230 万 token）
-Maximum concurrency for 1,048,576 tokens per request: 1.75x
+Maximum concurrency for 600,000 tokens per request: 1.75x
 Starting vLLM server on http://0.0.0.0:8888
 Application startup complete.
 DeepSeek V4 Flash DSpark is running: http://127.0.0.1:8888/v1/models

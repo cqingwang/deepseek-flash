@@ -4,7 +4,7 @@
 
 ```bash
 curl http://<IP_MGMT_A>:8888/health          # 期望 200
-curl http://<IP_MGMT_A>:8888/v1/models       # 期望 max_model_len: 1048576
+curl http://<IP_MGMT_A>:8888/v1/models       # 期望 max_model_len: 600000
 ```
 
 ## 8.2 最小对话
@@ -42,7 +42,7 @@ cd ~/DeepSeek-v4-Flash-DSpark-2x-DGX-Spark
 python3 scripts/benchmark-0731.py \
   --base-url http://127.0.0.1:8888/v1 \
   --model deepseek-v4-flash-0731 \
-  --prompt-lengths 256,2048,8192 --concurrency 1,3,6 \
+  --prompt-lengths 256,2048,8192 --concurrency 1,3,4 \
   --output results/benchmark-smoke.json
 ```
 

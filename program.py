@@ -4,7 +4,7 @@
 #
 # 两种用法：
 #   A. 管理与部署（head 上执行，经 deploy.sh 转发）：
-#        install / uninstall / restart / live_check / perf / doctor / help
+#        install / fetch / uninstall / restart / live_check / perf / doctor / help
 #   B. 部署后运行支撑（双机本机，systemd 单元 ExecStart 直调）：
 #        start / stop / ensure / status      —— 按本机 hostname 识别 head/worker 角色
 #   另含工具命令 load-config / gen-env（install 内部复用 + 调试导出）；
@@ -574,6 +574,49 @@ def resolve_model(consts, model_arg):
     return model_dir
 
 
+def resolve_fetch_target(consts, model_id):
+    """将 Hugging Face repo id 映射到 config.common.model_lib 下的模型目录。"""
+    parts = model_id.split("/")
+    if len(parts) != 2 or any(not part or part in (".", "..") for part in parts):
+        logtask("fetch", f"模型名必须是 <organization>/<model>，实际为: {model_id}", level=LogLevel.ERROR)
+    root = os.path.abspath(consts["model_lib"])
+    target = os.path.abspath(os.path.join(root, *parts))
+    if os.path.commonpath([root, target]) != root:
+        logtask("fetch", f"模型目标路径越出 common.model_lib: {target}", level=LogLevel.ERROR)
+    return target
+
+
+def cmd_fetch(consts, cfg, args):
+    """按 main 分支分块下载器约定下载模型到 common.model_lib/<org>/<model>。"""
+    model_id = args.model.strip()
+    target = resolve_fetch_target(consts, model_id)
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts", "model-fetch.py")
+    if not os.path.isfile(script):
+        logtask("fetch", f"缺少下载器 {script}", level=LogLevel.ERROR)
+    endpoint = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com").rstrip("/")
+    python_hint = os.environ.get("HF_PYTHON", os.path.expanduser("~/hf-venv/bin/python"))
+    download_python = python_hint if os.access(python_hint, os.X_OK) else sys.executable
+    logtask(
+        "fetch",
+        f"下载 {model_id} -> {target}；endpoint={endpoint}；workers=20；Range=8MiB；SHA-256=on",
+    )
+    env = os.environ.copy()
+    env["HF_HUB_DISABLE_XET"] = "1"
+    dotask(
+        download_python,
+        [script, "--repo-id", model_id, "--destination", target, "--endpoint", endpoint],
+        cwd=os.path.dirname(os.path.abspath(__file__)),
+        env=env,
+        stdout=None,
+        stderr=None,
+        check=True,
+    )
+    if not os.path.isfile(os.path.join(target, "config.json")):
+        logtask("fetch", f"下载完成但缺少 {target}/config.json，请检查模型名或下载结果", level=LogLevel.ERROR)
+    logtask("fetch", f"模型已下载到 {target}；请按 06 章同步到 worker 后再执行 install")
+    return 0
+
+
 def installed_model_name(consts):
     """读取 install 生成的服务名，避免切换模型后验证仍请求默认模型。"""
     try:
@@ -1021,6 +1064,7 @@ def cmd_help(consts=None, cfg=None, rest=None):
 
 管理/部署（head 上，经 deploy.sh）:
   install [模型路径]        安装/覆盖安装（缺省用 common.default_model）
+  fetch <org>/<model>       下载模型到 common.model_lib/<org>/<model>
   uninstall                清理部署（停容器+移除模型注册+禁用自启）
   restart                  重启集群（= stop + start）
   display off|on            设置双机默认终端/图形启动模式（重启后生效）
@@ -1068,6 +1112,8 @@ def build_parser():
     # 管理与部署（head，经 deploy.sh）
     pm = sub.add_parser("install", help="安装/覆盖安装")
     pm.add_argument("model", nargs="?", help="模型绝对路径（缺省 common.default_model）")
+    pm = sub.add_parser("fetch", help="下载模型到 common.model_lib")
+    pm.add_argument("model", help="Hugging Face 模型名，例如 deepseek-ai/DeepSeek-V4-Flash-0731")
     sub.add_parser("uninstall", help="清理部署")
     sub.add_parser("restart", help="重启集群（= stop + start）")
     pm = sub.add_parser("display", help="设置双机默认终端/图形启动模式")
@@ -1107,6 +1153,7 @@ def main(argv):
     drop_privilege(consts, argv)
     dispatch = {
         "install": cmd_install,
+        "fetch": cmd_fetch,
         "uninstall": cmd_uninstall,
         "restart": cmd_restart,
         "display": cmd_display,
