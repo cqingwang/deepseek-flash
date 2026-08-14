@@ -448,14 +448,14 @@ class ModelLinkLayoutTests(unittest.TestCase):
         )
         self.assertIn("DSPARK_REVISION_ABLITERATED=", env)
 
-    def test_install_defaults_use_600k_context_and_four_sequences(self):
+    def test_install_defaults_use_one_m_context_and_six_sequences(self):
         with open("dspark.env.json", encoding="utf-8") as stream:
             template = json.load(stream)
-        self.assertEqual(template["MAX_MODEL_LEN"], "600000")
-        self.assertEqual(template["MAX_NUM_SEQS"], "4")
+        self.assertEqual(template["MAX_MODEL_LEN"], "1048576")
+        self.assertEqual(template["MAX_NUM_SEQS"], "6")
         compose = Path("dspark/docker-compose.dspark.yml").read_text(encoding="utf-8")
-        self.assertIn("--max-model-len ${MAX_MODEL_LEN:-600000}", compose)
-        self.assertIn("--max-num-seqs ${MAX_NUM_SEQS:-4}", compose)
+        self.assertIn("--max-model-len ${MAX_MODEL_LEN:-1048576}", compose)
+        self.assertIn("--max-num-seqs ${MAX_NUM_SEQS:-6}", compose)
 
     @mock.patch("program.ssh_task")
     @mock.patch("program.dotask")

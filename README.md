@@ -36,7 +36,7 @@
 
 - 模型：`deepseek-ai/DeepSeek-V4-Flash-0731`（官方 0731 GA，I8/FP4 量化，**166.9 GB**，48 分片）
 - 推理引擎：vLLM 0.25.2（`ghcr.io/anemll/dspark-vllm-gx10:0.1.1`），TP=2，DSpark MTP5 投机解码
-- KV cache：`nvfp4_ds_mla`，双机约 **230 万 token** 共享池（94baabf + util 0.835 实测），默认 `max_model_len=600000`、`max_num_seqs=4`
+- KV cache：`nvfp4_ds_mla`，双机约 **230 万 token** 共享池（94baabf + util 0.835 实测），默认 `max_model_len=1048576`、`max_num_seqs=6`
 - 实测性能（社区 + 本方案）：单流约 **60–96 tok/s**，热机 decode ~78–80 tok/s，DSpark 接受率 ~91%，
   高并发聚合最高约 340 tok/s（社区数据，需配合 `DEFAULT_THINKING=low/off` 压测）
 - 长跑体验（本方案实测）：Agent/Vibe Coding 连续多轮长跑 **稳定不崩溃**，单会话 **60–70 tok/s**，
