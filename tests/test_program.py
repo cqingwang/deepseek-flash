@@ -434,6 +434,20 @@ class ModelLinkLayoutTests(unittest.TestCase):
         self.assertIn(
             "DSPARK_ENCODING_FILE=/cache/huggingface/models/DeepSeek-V4-Flash-0731/encoding/encoding_dsv4.py", env)
 
+    def test_gen_env_abliterated_selects_local_abliterated_lane_without_revision(self):
+        cfg = {**self.cfg, "common": {**self.cfg["common"], "model_variant": "abliterated"}}
+        env = program.gen_env(
+            cfg,
+            "/opt/models/drowzeys/keys-DeepSeekV4-Flash-GA-0731-Dspark-Abliterated-32-32",
+            template={},
+        )
+        self.assertIn("ABLITERATED=1", env)
+        self.assertIn(
+            "DSPARK_MODEL_ABLITERATED=/cache/huggingface/models/keys-DeepSeekV4-Flash-GA-0731-Dspark-Abliterated-32-32",
+            env,
+        )
+        self.assertIn("DSPARK_REVISION_ABLITERATED=", env)
+
     def test_install_defaults_use_600k_context_and_four_sequences(self):
         with open("dspark.env.json", encoding="utf-8") as stream:
             template = json.load(stream)

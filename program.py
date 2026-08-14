@@ -366,6 +366,10 @@ def gen_env(cfg, model_dir, template=None):
     """
     common, head, worker = cfg["common"], cfg["head"], cfg["worker"]
     short = os.path.basename(model_dir.rstrip("/"))
+    model_variant = str(common.get("model_variant", "official")).strip().lower()
+    if model_variant not in {"official", "abliterated"}:
+        logtask("gen-env", f"common.model_variant 必须是 official 或 abliterated，实际为: {model_variant}", level=LogLevel.ERROR)
+    abliterated = model_variant == "abliterated"
     served = short.lower()
     if template is None:
         template = load_env_template()
@@ -391,6 +395,9 @@ def gen_env(cfg, model_dir, template=None):
         "HF_CACHE": common["model_lib"],
         "DSPARK_MODEL_ID": model_dir,
         "DSPARK_MODEL_OFFICIAL": "/cache/huggingface/models/%s" % short,
+        "DSPARK_MODEL_ABLITERATED": "/cache/huggingface/models/%s" % short,
+        "DSPARK_REVISION_ABLITERATED": "",
+        "ABLITERATED": "1" if abliterated else "0",
         "DSPARK_ENCODING_FILE": "/cache/huggingface/models/%s/encoding/encoding_dsv4.py" % short,
         "SERVED_MODEL_NAME": served,
         "VLLM_HOST_IP": head["fabric_ip"],

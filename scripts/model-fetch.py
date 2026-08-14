@@ -18,13 +18,13 @@ from threading import Lock
 from urllib.parse import quote
 
 import httpx
-from huggingface_hub import HfApi
 
 
 CHUNK_SIZE = 8 * 1024 * 1024
 WORKERS = 20
 TIMEOUT = 120.0
 RETRIES = 8
+MANIFEST_RETRIES = 5
 
 
 class ModelFetcher:
@@ -38,6 +38,9 @@ class ModelFetcher:
             timeout=TIMEOUT,
             headers={"User-Agent": "deepseek-flash-model-fetch/1.0"},
             transport=httpx.HTTPTransport(verify=True),
+            # hf-mirror.com 是文档约定的直连端点；避免无关的 SOCKS 代理在首次请求前阻断下载，
+            # 如确需继承代理环境，设置 HF_FETCH_TRUST_ENV=1。
+            trust_env=os.environ.get("HF_FETCH_TRUST_ENV") == "1",
         )
         self.lock = Lock()
         self.stats = {"bytes": 0, "started": time.time()}
@@ -45,19 +48,60 @@ class ModelFetcher:
     def close(self):
         self.client.close()
 
+    def _manifest_items(self):
+        """通过同一 HTTP 客户端读取 HF tree API，避免 HfApi 隐式代理初始化。"""
+        url = f"{self.endpoint}/api/models/{self.repo_id}/tree/main"
+        params = {"recursive": "true", "expand": "true"}
+        headers = {}
+        if os.environ.get("HF_TOKEN"):
+            headers["Authorization"] = f"Bearer {os.environ['HF_TOKEN']}"
+
+        while url:
+            last_error = None
+            for attempt in range(1, MANIFEST_RETRIES + 1):
+                try:
+                    response = self.client.get(url, params=params, headers=headers)
+                    response.raise_for_status()
+                    payload = response.json()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    last_error = exc
+                    retryable = exc.response.status_code == 429 or exc.response.status_code >= 500
+                    if not retryable:
+                        raise RuntimeError(f"读取模型清单失败: {url}: HTTP {exc.response.status_code}") from exc
+                except httpx.TransportError as exc:
+                    last_error = exc
+                except ValueError as exc:
+                    raise RuntimeError(f"模型清单不是有效 JSON: {url}") from exc
+                if attempt < MANIFEST_RETRIES:
+                    delay = min(2 * attempt, 10)
+                    print(f"[manifest-retry] {attempt}/{MANIFEST_RETRIES - 1}，{delay}s 后重试: {last_error}", flush=True)
+                    time.sleep(delay)
+            else:
+                raise RuntimeError(
+                    f"读取模型清单失败（重试 {MANIFEST_RETRIES} 次）: {url}: {last_error}"
+                ) from last_error
+            if not isinstance(payload, list):
+                raise RuntimeError(f"模型清单格式错误: {url}")
+            yield from payload
+            url = response.links.get("next", {}).get("url")
+            params = None
+
     def load_manifest(self):
-        token = os.environ.get("HF_TOKEN") or None
-        api = HfApi(endpoint=self.endpoint, token=token)
-        tree = list(api.list_repo_tree(self.repo_id, repo_type="model", recursive=True, expand=True))
+        tree = list(self._manifest_items())
+
+        def field(item, name, default=None):
+            return item.get(name, default) if isinstance(item, dict) else getattr(item, name, default)
+
         self.files = sorted(
             [
                 {
-                    "path": item.path,
-                    "size": int(item.size or 0),
-                    "sha256": getattr(getattr(item, "lfs", None), "sha256", None),
+                    "path": field(item, "path"),
+                    "size": int(field(item, "size") or 0),
+                    "sha256": field(field(item, "lfs"), "sha256"),
                 }
                 for item in tree
-                if getattr(item, "size", None) is not None
+                if field(item, "size") is not None
             ],
             key=lambda item: -item["size"],
         )

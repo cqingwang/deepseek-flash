@@ -33,6 +33,10 @@ python3 -m venv ~/hf-venv
 HF_ENDPOINT=https://hf-mirror.com ./deploy.sh --fetch deepseek-ai/DeepSeek-V4-Flash-0731
 ```
 
+下载器默认不继承 `HTTP(S)_PROXY`/`ALL_PROXY`，避免本机未安装 `socksio` 的 SOCKS 配置阻断
+清单请求；清单连接被镜像临时断开时会自动退避重试 5 次；如确需通过环境代理访问端点，
+可显式设置 `HF_FETCH_TRUST_ENV=1`。
+
 也可用 `HF_TOKEN` 提供 Hugging Face token。模型已经存在时再次执行 `--fetch` 会复用本地
 目录继续下载，不会因为目录存在而跳过缺失文件。
 
