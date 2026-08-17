@@ -1,6 +1,3 @@
 [submodule "dspark"]
 	path = dspark
 	url = git@github.com:cqingwang/dspark.git
-[submodule "dashboard"]
-	path = dashboard
-	url = git@github.com:maliubiao/dgx-spark-2-deepseek-flash-dashboard.git
