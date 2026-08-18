@@ -28,6 +28,8 @@ common:
   sparkdash_url: http://127.0.0.1:5555             # install 时注入 common.api_key 的 SparkDash API
   max_request: 4                                  # 映射到 .env 的 MAX_NUM_SEQS
   max_token: 1048576                               # 映射到 .env 的 MAX_MODEL_LEN
+  max_num_batched_tokens: 16384                    # 官方 c=4 容量 profile；映射到 MAX_NUM_BATCHED_TOKENS
+  mtp_num_tokens: 6                                # 官方 c=4 容量 profile；映射到 MTP_NUM_TOKENS
   master_port: 25000                # NCCL/分布式 master 端口
 
 # ---------- head 节点（spark-a，主控） ----------

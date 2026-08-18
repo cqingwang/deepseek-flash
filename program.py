@@ -371,10 +371,12 @@ def gen_env(cfg, model_dir, template=None):
     try:
         max_request = int(common["max_request"])
         max_token = int(common["max_token"])
+        max_num_batched_tokens = int(common["max_num_batched_tokens"])
+        mtp_num_tokens = int(common["mtp_num_tokens"])
     except (KeyError, TypeError, ValueError):
-        logtask("gen-env", "common.max_request 和 common.max_token 必须配置为正整数", level=LogLevel.ERROR)
-    if max_request <= 0 or max_token <= 0:
-        logtask("gen-env", "common.max_request 和 common.max_token 必须大于 0", level=LogLevel.ERROR)
+        logtask("gen-env", "common.max_request、common.max_token、common.max_num_batched_tokens 和 common.mtp_num_tokens 必须配置为正整数", level=LogLevel.ERROR)
+    if max_request <= 0 or max_token <= 0 or max_num_batched_tokens <= 0 or mtp_num_tokens <= 0:
+        logtask("gen-env", "common.max_request、common.max_token、common.max_num_batched_tokens 和 common.mtp_num_tokens 必须大于 0", level=LogLevel.ERROR)
     model_root = os.path.abspath(common["model_lib"])
     model_relative = os.path.relpath(os.path.abspath(model_dir), model_root)
     if model_relative == ".." or model_relative.startswith(".." + os.sep):
@@ -421,6 +423,8 @@ def gen_env(cfg, model_dir, template=None):
         # ---- 容量参数（config.yaml SSOT） ----
         "MAX_NUM_SEQS": str(max_request),
         "MAX_MODEL_LEN": str(max_token),
+        "MAX_NUM_BATCHED_TOKENS": str(max_num_batched_tokens),
+        "MTP_NUM_TOKENS": str(mtp_num_tokens),
     })
     missing = [key for key, val in d.items() if val is None and not key.startswith("_")]
     if missing:
