@@ -368,6 +368,13 @@ def gen_env(cfg, model_dir, template=None):
     """
     common, head, worker = cfg["common"], cfg["head"], cfg["worker"]
     short = os.path.basename(model_dir.rstrip("/"))
+    try:
+        max_request = int(common["max_request"])
+        max_token = int(common["max_token"])
+    except (KeyError, TypeError, ValueError):
+        logtask("gen-env", "common.max_request 和 common.max_token 必须配置为正整数", level=LogLevel.ERROR)
+    if max_request <= 0 or max_token <= 0:
+        logtask("gen-env", "common.max_request 和 common.max_token 必须大于 0", level=LogLevel.ERROR)
     model_root = os.path.abspath(common["model_lib"])
     model_relative = os.path.relpath(os.path.abspath(model_dir), model_root)
     if model_relative == ".." or model_relative.startswith(".." + os.sep):
@@ -411,6 +418,9 @@ def gen_env(cfg, model_dir, template=None):
         "WORKER_VLLM_HOST_IP": worker["fabric_ip"],
         # ---- 运行时镜像 ----
         "DSPARK_VLLM_IMAGE": common["vllm_image"],
+        # ---- 容量参数（config.yaml SSOT） ----
+        "MAX_NUM_SEQS": str(max_request),
+        "MAX_MODEL_LEN": str(max_token),
     })
     missing = [key for key, val in d.items() if val is None and not key.startswith("_")]
     if missing:
@@ -719,13 +729,6 @@ def sync_sparkdash_api_key(consts, cfg):
     logtask("sparkdash", f"已同步 {synced}/{len(targets)} 个 Spark 的 LLM API key（端口 {llm_port}）")
 
 
-def activate_units(consts):
-    """通过 systemd 唯一入口按 worker → head 顺序启动集群。"""
-    logtask("activate_units", "通过 systemd 启动 worker/head，避免与直接 compose 启动竞争")
-    ssh_task(consts["worker_ssh"], "sudo systemctl start dspark-vllm-worker.service", check=True)
-    dotask("sudo systemctl start dspark-vllm-head.service", check=True)
-
-
 def cmd_install(consts, cfg, args):
     model_arg = args.model
     logtask("install", f"安装/覆盖安装：部署 program.py+config 到双机、装 systemd 单元、注册模型、生成生产 .env、启动并等待 API；model={model_arg or consts['default_model']} config={consts['config_local']}")
@@ -745,9 +748,10 @@ def cmd_install(consts, cfg, args):
     logtask("install", f"模型: {model_dir} (served: {short.lower()})")
     install_env(consts, cfg, model_dir)
     sync_sparkdash_api_key(consts, cfg)
-    # systemd 的 worker/head 单元是唯一启动入口；它们内部复用同一个
-    # program.py start/ensure 链路，避免先直接启动再重复 systemctl start。
-    activate_units(consts)
+    # install 使用直接启动入口以保留上游 stdout/stderr 和 API 等待；
+    # deploy_units 已完成 systemd enable，后续开机/守护仍由 unit 接管，
+    # 这里不能再次 systemctl start/restart，避免重复启动或把输出收进 journal。
+    cmd_start(consts, cfg, [])
     logtask("install", "完成")
     return 0
 

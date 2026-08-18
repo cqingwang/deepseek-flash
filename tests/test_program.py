@@ -150,7 +150,7 @@ class ContainerStateTests(unittest.TestCase):
         stop.assert_called_once_with(self.k, cfg, [])
         start.assert_called_once_with(self.k, cfg, [])
 
-    @mock.patch("program.activate_units")
+    @mock.patch("program.cmd_start", return_value=0)
     @mock.patch("program.wait_for_api", return_value=True)
     @mock.patch("program.install_env")
     @mock.patch("program.container_exists_remote", return_value=False)
@@ -162,14 +162,14 @@ class ContainerStateTests(unittest.TestCase):
     def test_install_forwards_config_to_nested_start(
         self, _isfile, _validate, _deploy_ops, _deploy_units,
         _head_exists, _worker_exists, _install_env,
-        _wait, _activate,
+        _wait, start,
     ):
         consts = dict(self.k, config_local="/etc/dspark-vllm/config.yaml",
                       default_model="/opt/models/org/model", model_lib="/opt/models")
         cfg = {"common": {"repo": "/opt/deepseek-flash"}}
         args = argparse.Namespace(model=None)
         self.assertEqual(program.cmd_install(consts, cfg, args), 0)
-        self.assertTrue(_activate.called)
+        start.assert_called_once_with(consts, cfg, [])
 
 
 class CliValidationTests(unittest.TestCase):
@@ -413,6 +413,8 @@ class ModelMountLayoutTests(unittest.TestCase):
         self.cfg = {
             "common": {
                 "model_lib": "/opt/models",
+                "max_request": 6,
+                "max_token": 1048576,
                 "master_port": 25000,
                 "vllm_image": "ghcr.io/anemll/dspark-vllm-gx10:0.1.1",
             },
@@ -428,6 +430,11 @@ class ModelMountLayoutTests(unittest.TestCase):
             "DSPARK_MODEL_OFFICIAL=/models/deepseek-ai/DeepSeek-V4-Flash-0731", env)
         self.assertIn(
             "DSPARK_ENCODING_FILE=/models/deepseek-ai/DeepSeek-V4-Flash-0731/encoding/encoding_dsv4.py", env)
+
+    def test_gen_env_maps_config_capacity_to_runtime_env(self):
+        env = program.gen_env(self.cfg, "/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731", template={})
+        self.assertIn("MAX_NUM_SEQS=6", env)
+        self.assertIn("MAX_MODEL_LEN=1048576", env)
 
     def test_gen_env_abliterated_selects_local_abliterated_lane_without_revision(self):
         cfg = {**self.cfg, "common": {**self.cfg["common"], "model_variant": "abliterated"}}
@@ -474,6 +481,8 @@ class ApiKeyTests(unittest.TestCase):
         self.cfg = {
             "common": {
                 "model_lib": "/opt/models",
+                "max_request": 6,
+                "max_token": 1048576,
                 "master_port": 25000,
                 "vllm_image": "ghcr.io/anemll/dspark-vllm-gx10:0.1.1",
                 "api_url": "http://127.0.0.1:8888/v1/models",

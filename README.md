@@ -121,6 +121,9 @@
    `DSPARK_MODEL_OFFICIAL=/models/<org>/<model>`）并同步双机
 6. 启动（worker 先起、head 后起）并轮询等待 API（冷启动最长约 20 分钟）
 
+容量参数在 `config.yaml` 的 `common.max_request` 与 `common.max_token` 中配置，分别映射到
+`.env.dspark` 的 `MAX_NUM_SEQS` 与 `MAX_MODEL_LEN`。
+
 ### 4.2 日常维护
 
 **启动 / 重启**

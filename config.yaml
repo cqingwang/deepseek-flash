@@ -26,6 +26,8 @@ common:
   api_url: http://127.0.0.1:8888/v1/models           # 健康检查端点
   api_key: deepseek                                       # vLLM HTTP 服务 API 密钥；空串则关闭鉴权
   sparkdash_url: http://127.0.0.1:5555             # install 时注入 common.api_key 的 SparkDash API
+  max_request: 4                                  # 映射到 .env 的 MAX_NUM_SEQS
+  max_token: 1048576                               # 映射到 .env 的 MAX_MODEL_LEN
   master_port: 25000                # NCCL/分布式 master 端口
 
 # ---------- head 节点（spark-a，主控） ----------
