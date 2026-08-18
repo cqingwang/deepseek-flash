@@ -13,6 +13,7 @@
 | `common.repo` | 本项目部署根路径（双机） | `/opt/deepseek-flash` |
 | `common.runtime_repo` | MiaAI DSpark 子项目路径（双机，包含 compose/start/stop） | `/opt/deepseek-flash/dspark` |
 | `common.model_lib` | 宿主模型库根目录 | `/opt/models` |
+| `common.sparkdash_url` | SparkDash 本机 API；install 会用 `common.api_key` 同步 LLM key | `http://127.0.0.1:5555` |
 | `common.default_model` | 默认模型绝对路径 | `/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731` |
 | `<IP_FABRIC_A>` | head 集群网 IP（Cluster Assistant 生成） | 示例 `10.100.192.1` |
 | `<IP_FABRIC_B>` | worker 集群网 IP | 示例 `10.100.192.2` |

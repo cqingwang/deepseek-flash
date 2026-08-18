@@ -152,7 +152,6 @@ class ContainerStateTests(unittest.TestCase):
 
     @mock.patch("program.activate_units")
     @mock.patch("program.wait_for_api", return_value=True)
-    @mock.patch("program.cmd_start", return_value=0)
     @mock.patch("program.install_env")
     @mock.patch("program.container_exists_remote", return_value=False)
     @mock.patch("program.container_exists_local", return_value=False)
@@ -163,14 +162,14 @@ class ContainerStateTests(unittest.TestCase):
     def test_install_forwards_config_to_nested_start(
         self, _isfile, _validate, _deploy_ops, _deploy_units,
         _head_exists, _worker_exists, _install_env,
-        start, _wait, _activate,
+        _wait, _activate,
     ):
         consts = dict(self.k, config_local="/etc/dspark-vllm/config.yaml",
                       default_model="/opt/models/org/model", model_lib="/opt/models")
         cfg = {"common": {"repo": "/opt/deepseek-flash"}}
         args = argparse.Namespace(model=None)
         self.assertEqual(program.cmd_install(consts, cfg, args), 0)
-        start.assert_called_once_with(consts, cfg, [])
+        self.assertTrue(_activate.called)
 
 
 class CliValidationTests(unittest.TestCase):
@@ -514,6 +513,49 @@ class ApiKeyTests(unittest.TestCase):
         self.assertEqual(
             dotask.call_args.args[1],
             ["-H", "Authorization: Bearer deepseek", self.k["api_url"]],
+        )
+
+    @mock.patch("program.urllib.request.urlopen")
+    def test_sync_sparkdash_api_key_uses_configured_key_for_registered_sparks(self, urlopen):
+        registry_response = mock.MagicMock()
+        registry_response.__enter__.return_value = registry_response
+        registry_response.read.return_value = json.dumps({
+            "sparks": [
+                {"id": "spark-a", "lanIp": "192.168.2.180", "llmPorts": [8888]},
+                {"id": "spark-b", "lanIp": "192.168.2.161", "llmPorts": [8888]},
+            ]
+        }).encode()
+        update_response = mock.MagicMock()
+        update_response.__enter__.return_value = update_response
+        update_response.status = 200
+        urlopen.side_effect = [registry_response, update_response, update_response]
+
+        consts = {
+            "api_key": "deepseek",
+            "api_url": "http://127.0.0.1:8888/v1/models",
+            "sparkdash_url": "http://127.0.0.1:5555",
+        }
+        cfg = {
+            "head": {"management_ip": "192.168.2.180"},
+            "worker": {"management_ip": "192.168.2.161"},
+        }
+
+        program.sync_sparkdash_api_key(consts, cfg)
+
+        self.assertEqual(urlopen.call_count, 3)
+        for call in urlopen.call_args_list[1:]:
+            request = call.args[0]
+            self.assertEqual(request.get_method(), "PUT")
+            self.assertEqual(request.get_header("Content-type"), "application/json")
+            self.assertEqual(json.loads(request.data), {"apiKey": "deepseek"})
+
+    @mock.patch("program.urllib.request.urlopen", side_effect=OSError("connection refused"))
+    def test_sync_sparkdash_is_non_fatal_when_dashboard_is_unavailable(self, _urlopen):
+        program.sync_sparkdash_api_key(
+            {"api_key": "deepseek", "api_url": "http://127.0.0.1:8888/v1/models",
+             "sparkdash_url": "http://127.0.0.1:5555"},
+            {"head": {"management_ip": "192.168.2.180"},
+             "worker": {"management_ip": "192.168.2.161"}},
         )
 
     @mock.patch("program.installed_model_name", return_value="deepseek-v4-flash-0731")

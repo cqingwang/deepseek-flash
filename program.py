@@ -29,7 +29,9 @@ import socket
 import subprocess
 import sys
 import time
-from urllib.parse import urlsplit, urlunsplit
+import urllib.error
+import urllib.request
+from urllib.parse import quote, urlsplit, urlunsplit
 
 
 # ---- 通用辅助（Fail-Fast） ----
@@ -110,6 +112,7 @@ def parser_constants(cfg):
         "api_url": common["api_url"],
         "perf_api_url": perf_api_url,
         "api_key": common.get("api_key", ""),
+        "sparkdash_url": common.get("sparkdash_url", "http://127.0.0.1:5555").rstrip("/"),
         "env_file": f"{runtime_repo}/.env.dspark",
         "compose_file": f"{runtime_repo}/docker-compose.dspark.yml",
         "head_hostname": head["hostname"],
@@ -658,9 +661,67 @@ def install_env(consts, cfg, model_dir):
              check=True)
 
 
+def sync_sparkdash_api_key(consts, cfg):
+    """在 install 启动集群前，将 config.yaml 的 API key 同步到 SparkDash。
+
+    SparkDash 将 key 加密保存到自身的 secrets store；这里仅通过其本地 API
+    注入，不把明文 key 写入日志或仓库。SparkDash 不可用时只告警，不阻断
+    DSpark 部署，避免监控组件故障影响模型服务。
+    """
+    api_key = str(consts.get("api_key") or "").strip()
+    if not api_key:
+        logtask("sparkdash", "common.api_key 为空，跳过 SparkDash API key 同步")
+        return
+    base_url = consts.get("sparkdash_url", "http://127.0.0.1:5555").rstrip("/")
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request(f"{base_url}/api/sparks"), timeout=5
+        ) as response:
+            registry = json.load(response)
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        logtask("sparkdash", f"未检测到可用 SparkDash（{exc}），跳过 API key 同步", level=LogLevel.WARN)
+        return
+
+    common_api = urlsplit(consts["api_url"])
+    llm_port = common_api.port
+    target_ips = {
+        str(cfg["head"]["management_ip"]).strip("[]"),
+        str(cfg["worker"]["management_ip"]).strip("[]"),
+    }
+    sparks = registry.get("sparks", []) if isinstance(registry, dict) else []
+    targets = [spark for spark in sparks if str(spark.get("lanIp", "")) in target_ips]
+    if not targets:
+        logtask("sparkdash", f"未找到 head/worker 注册项（目标 IP: {sorted(target_ips)}），跳过 API key 同步", level=LogLevel.WARN)
+        return
+
+    payload = json.dumps({"apiKey": api_key}).encode("utf-8")
+    synced = 0
+    for spark in targets:
+        spark_id = str(spark.get("id", "")).strip()
+        if not spark_id:
+            continue
+        ports = spark.get("llmPorts") or ([spark.get("llmPort")] if spark.get("llmPort") else [])
+        if llm_port not in {int(port) for port in ports if str(port).isdigit()}:
+            continue
+        request = urllib.request.Request(
+            f"{base_url}/api/sparks/{quote(spark_id, safe='')}/llm-ports/{llm_port}/api-key",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                if response.status < 200 or response.status >= 300:
+                    raise OSError(f"HTTP {response.status}")
+            synced += 1
+        except (OSError, urllib.error.HTTPError, urllib.error.URLError) as exc:
+            logtask("sparkdash", f"Spark {spark_id} API key 同步失败（{exc}），继续部署", level=LogLevel.WARN)
+    logtask("sparkdash", f"已同步 {synced}/{len(targets)} 个 Spark 的 LLM API key（端口 {llm_port}）")
+
+
 def activate_units(consts):
-    """让 install 后的 systemd 单元进入 active 状态，确保后续 stop/Restart 生效。"""
-    logtask("activate_units", "启动 worker/head systemd 单元并保持自恢复状态")
+    """通过 systemd 唯一入口按 worker → head 顺序启动集群。"""
+    logtask("activate_units", "通过 systemd 启动 worker/head，避免与直接 compose 启动竞争")
     ssh_task(consts["worker_ssh"], "sudo systemctl start dspark-vllm-worker.service", check=True)
     dotask("sudo systemctl start dspark-vllm-head.service", check=True)
 
@@ -683,9 +744,9 @@ def cmd_install(consts, cfg, args):
     short = os.path.basename(model_dir.rstrip("/"))
     logtask("install", f"模型: {model_dir} (served: {short.lower()})")
     install_env(consts, cfg, model_dir)
-    cmd_start(consts, cfg, [])
-    # 上游 start 脚本自身已等待 /v1/models 并执行最小 chat；这里不要再
-    # 无条件重复轮询，否则 API 已成功时仍会因鉴权或网络瞬态被等满 20 分钟。
+    sync_sparkdash_api_key(consts, cfg)
+    # systemd 的 worker/head 单元是唯一启动入口；它们内部复用同一个
+    # program.py start/ensure 链路，避免先直接启动再重复 systemctl start。
     activate_units(consts)
     logtask("install", "完成")
     return 0
