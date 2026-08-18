@@ -115,8 +115,10 @@
 1. 同步 `program.py` / `dspark.env.json` / `config.yaml` 到双机 `/etc/dspark-vllm/`
 2. 安装 head（start/stop）与 worker（ensure 守护）systemd 单元
 3. 检测到现存容器先停止
-4. 双机注册模型 symlink：`/opt/models/models/<short>` → `/opt/models/<org>/<model>`
-5. 由 `gen_env` 生成生产 `.env.dspark`（60+ 键，含 `DSPARK_MODEL_OFFICIAL=/cache/huggingface/models/<short>`）并同步双机
+4. Compose 将双机宿主模型根 `/opt/models` 直接只读映射到容器 `/models`，模型路径保持
+   `/models/<org>/<model>`，不创建额外 symlink 目录
+5. 由 `gen_env` 生成生产 `.env.dspark`（60+ 键，含
+   `DSPARK_MODEL_OFFICIAL=/models/<org>/<model>`）并同步双机
 6. 启动（worker 先起、head 后起）并轮询等待 API（冷启动最长约 20 分钟）
 
 ### 4.2 日常维护
@@ -155,9 +157,8 @@ systemd target，不会切换当前 target，也不会停止正在运行的 DSpa
 #    或改 config.yaml 的 common.default_model 后直接：./deploy.sh --install
 ```
 
-换模型本质 = 重新 `install`：停旧容器 → 注册新模型 symlink → 按新模型重新生成 `.env.dspark` → 启动。
-注意：symlink 注册为单层 `<short>` 名（`/opt/models/models/<short>`），同名短名不同 `<org>` 的模型会互相
-覆盖——当前约定一次部署一个模型，切换靠重新 `install`（旧模型文件需仍在 `/opt/models` 下）。
+换模型本质 = 重新 `install`：停旧容器 → 按新模型重新生成 `.env.dspark` → 启动。
+模型在宿主和容器内都保留 `<org>/<model>` 两级路径，切换不会创建或覆盖额外的短名 symlink。
 
 **状态与验证**
 

@@ -28,7 +28,7 @@
 | `<HF_MODEL_SHORT>` | 模型 id 的组织名去掉后的短名（用于本地路径） | `DeepSeek-V4-Flash-0731` |
 | `<IMAGE>` | vLLM 运行时镜像 | `ghcr.io/anemll/dspark-vllm-gx10:0.1.1` |
 | `ABLITERATED` | 检查点开关：`0`=官方 0731，`1`=Keys abliterated 变体 | `0`（默认官方） |
-| `DSPARK_MODEL_OFFICIAL` | 官方模型容器内路径（**新版 start 脚本强制从它解析 `DSPARK_MODEL`，不再直接设 `DSPARK_MODEL`**） | `/cache/huggingface/models/DeepSeek-V4-Flash-0731`（本地 156G 目录） |
+| `DSPARK_MODEL_OFFICIAL` | 官方模型容器内路径（**新版 start 脚本强制从它解析 `DSPARK_MODEL`，不再直接设 `DSPARK_MODEL`**） | `/models/deepseek-ai/DeepSeek-V4-Flash-0731`（本地 156G 目录） |
 | `DSPARK_REVISION` | 官方 HF revision pin（Issue #19）。**未定义**时 start 脚本自动 pin `9e165c30…`；显式空值 = 不 pin；本地绝对路径模型会自动清空该值 | 留空即可 |
 | `ENABLE_VL_SIDECAR` | 视觉开关：`0`=text-only（默认，最大 KV），`1`=VL sidecar 实验路径 | `0` |
 | `GPU_MEMORY_UTILIZATION_TEXT` | text-only 显存利用率（新版替代旧 `GPU_MEMORY_UTILIZATION`） | `0.835`（KV 池 ≈230 万 token） |

@@ -154,7 +154,6 @@ class ContainerStateTests(unittest.TestCase):
     @mock.patch("program.wait_for_api", return_value=True)
     @mock.patch("program.cmd_start", return_value=0)
     @mock.patch("program.install_env")
-    @mock.patch("program.link_model")
     @mock.patch("program.container_exists_remote", return_value=False)
     @mock.patch("program.container_exists_local", return_value=False)
     @mock.patch("program.deploy_units")
@@ -163,7 +162,7 @@ class ContainerStateTests(unittest.TestCase):
     @mock.patch("program.os.path.isfile", return_value=True)
     def test_install_forwards_config_to_nested_start(
         self, _isfile, _validate, _deploy_ops, _deploy_units,
-        _head_exists, _worker_exists, _link_model, _install_env,
+        _head_exists, _worker_exists, _install_env,
         start, _wait, _activate,
     ):
         consts = dict(self.k, config_local="/etc/dspark-vllm/config.yaml",
@@ -286,7 +285,6 @@ class ConfigurationBehaviorTests(unittest.TestCase):
                 "project": "deepseek-v4-flash",
                 "container": "deepseek-v4-flash-vllm-dspark-1",
                 "model_lib": "/opt/models",
-                "model_links": "/opt/models/models",
                 "default_model": "/opt/models/org/model",
                 "vllm_image": "image:tag",
                 "api_url": "http://127.0.0.1:8888/v1/models",
@@ -398,7 +396,6 @@ class ConfigurationBehaviorTests(unittest.TestCase):
     def test_doctor_checks_real_default_model_before_symlink_registration(self, _isfile, dotask, ssh):
         consts = {
             "default_model": "/srv/models/org/model",
-            "model_links": "/srv/models/models",
         }
         dotask.return_value = subprocess.CompletedProcess(["du"], 0, stdout="170000000001\n", stderr="")
         ssh.return_value = subprocess.CompletedProcess(["ssh"], 0, stdout="170000000001\n", stderr="")
@@ -410,14 +407,13 @@ class ConfigurationBehaviorTests(unittest.TestCase):
         self.assertNotIn("/srv/models/models", dotask.call_args.args[0])
 
 
-class ModelLinkLayoutTests(unittest.TestCase):
-    """模型注册布局：宿主 /opt/models/<org>/<model> → symlink model_links/<short> → 容器内 /cache/huggingface/models/<short>。"""
+class ModelMountLayoutTests(unittest.TestCase):
+    """模型布局：宿主 /opt/models/<org>/<model> → 容器 /models/<org>/<model>。"""
 
     def setUp(self):
         self.cfg = {
             "common": {
                 "model_lib": "/opt/models",
-                "model_links": "/opt/models/models",
                 "master_port": 25000,
                 "vllm_image": "ghcr.io/anemll/dspark-vllm-gx10:0.1.1",
             },
@@ -428,11 +424,11 @@ class ModelLinkLayoutTests(unittest.TestCase):
 
     def test_gen_env_model_official_uses_single_short_per_main_template(self):
         env = program.gen_env(self.cfg, "/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731", template={})
-        # main 分支 .env.dspark 模板约定：DSPARK_MODEL_OFFICIAL=/cache/huggingface/models/<HF_MODEL_SHORT>（单层）
+        # 模型根目录直接映射到容器 /models，保留组织名和模型名两级路径。
         self.assertIn(
-            "DSPARK_MODEL_OFFICIAL=/cache/huggingface/models/DeepSeek-V4-Flash-0731", env)
+            "DSPARK_MODEL_OFFICIAL=/models/deepseek-ai/DeepSeek-V4-Flash-0731", env)
         self.assertIn(
-            "DSPARK_ENCODING_FILE=/cache/huggingface/models/DeepSeek-V4-Flash-0731/encoding/encoding_dsv4.py", env)
+            "DSPARK_ENCODING_FILE=/models/deepseek-ai/DeepSeek-V4-Flash-0731/encoding/encoding_dsv4.py", env)
 
     def test_gen_env_abliterated_selects_local_abliterated_lane_without_revision(self):
         cfg = {**self.cfg, "common": {**self.cfg["common"], "model_variant": "abliterated"}}
@@ -443,7 +439,7 @@ class ModelLinkLayoutTests(unittest.TestCase):
         )
         self.assertIn("ABLITERATED=1", env)
         self.assertIn(
-            "DSPARK_MODEL_ABLITERATED=/cache/huggingface/models/keys-DeepSeekV4-Flash-GA-0731-Dspark-Abliterated-32-32",
+            "DSPARK_MODEL_ABLITERATED=/models/drowzeys/keys-DeepSeekV4-Flash-GA-0731-Dspark-Abliterated-32-32",
             env,
         )
         self.assertIn("DSPARK_REVISION_ABLITERATED=", env)
@@ -457,18 +453,15 @@ class ModelLinkLayoutTests(unittest.TestCase):
         self.assertIn("--max-model-len ${MAX_MODEL_LEN:-1048576}", compose)
         self.assertIn("--max-num-seqs ${MAX_NUM_SEQS:-6}", compose)
 
-    @mock.patch("program.ssh_task")
-    @mock.patch("program.dotask")
-    @mock.patch("program.os.path.isfile", return_value=True)
-    def test_link_model_registers_single_short_symlink_to_org_model_dir(self, _isfile, dotask, _ssh):
-        k = {"model_links": "/opt/models/models", "model_lib": "/opt/models",
-             "worker_ssh": "chan@spark-b"}
-        program.link_model(k, "/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731")
-        ln_calls = [c for c in dotask.call_args_list if c.args[0] == "sudo ln -sfn"]
-        self.assertEqual(
-            ln_calls[0].args[1],
-            ["../deepseek-ai/DeepSeek-V4-Flash-0731",
-             "/opt/models/models/DeepSeek-V4-Flash-0731"])
+    def test_gen_env_keeps_organization_and_model_path(self):
+        env = program.gen_env(self.cfg, "/opt/models/drowzeys/model", template={})
+        self.assertIn("DSPARK_MODEL_OFFICIAL=/models/drowzeys/model", env)
+        self.assertNotIn("/opt/models/models", env)
+
+    def test_compose_maps_model_root_to_container_models_root(self):
+        compose = Path("dspark/docker-compose.dspark.yml").read_text(encoding="utf-8")
+        self.assertIn("${HF_CACHE:-${HOME}/.cache/huggingface}:/models:ro", compose)
+        self.assertNotIn("model_links", compose)
 
 
 class ApiKeyTests(unittest.TestCase):
@@ -482,7 +475,6 @@ class ApiKeyTests(unittest.TestCase):
         self.cfg = {
             "common": {
                 "model_lib": "/opt/models",
-                "model_links": "/opt/models/models",
                 "master_port": 25000,
                 "vllm_image": "ghcr.io/anemll/dspark-vllm-gx10:0.1.1",
                 "api_url": "http://127.0.0.1:8888/v1/models",
@@ -610,7 +602,7 @@ class ApiKeyTests(unittest.TestCase):
                 "user": "chan", "repo": "/opt/deepseek-flash",
                 "runtime_repo": "/opt/deepseek-flash/dspark", "project": "deepseek-v4-flash",
                 "container": "deepseek-v4-flash-vllm-dspark-1",
-                "model_lib": "/opt/models", "model_links": "/opt/models/models",
+            "model_lib": "/opt/models",
                 "default_model": "/opt/models/deepseek-ai/DeepSeek-V4-Flash-0731",
                 "vllm_image": "img", "api_url": "http://127.0.0.1:8888/v1/models",
                 "master_port": 25000, "api_key": "deepseek",

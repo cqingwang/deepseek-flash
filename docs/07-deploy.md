@@ -61,7 +61,7 @@ ssh <USER>@<IP_MGMT_B> 'sudo rsync -a --delete /tmp/deepseek-flash-dspark/ /opt/
   `WORKER_NCCL_*` 按 worker 实际口位填写（两台可以不同，本方案 head=Port0 / worker=Port1）
 - GID 索引留空：启动脚本默认 `NCCL_IB_GID_AUTO=1` 自动从 sysfs 解析
 - `ABLITERATED=0`（官方 0731 检查点；`1` 为 Keys abliterated 变体）
-- `DSPARK_MODEL_OFFICIAL=/cache/huggingface/models/DeepSeek-V4-Flash-0731`（本地路径，不经 HF hub；
+- `DSPARK_MODEL_OFFICIAL=/models/deepseek-ai/DeepSeek-V4-Flash-0731`（本地路径，不经 HF hub；
   **新版 start 脚本强制从 `DSPARK_MODEL_OFFICIAL` 解析 `DSPARK_MODEL`，不要再直接设 `DSPARK_MODEL`**）
 - `DSPARK_ENCODING_FILE=.../encoding/encoding_dsv4.py`（compose 启动时自动装入 vLLM）
 - `DSPARK_REVISION`：留空即可（未定义时脚本自动 pin 实测过的 `9e165c30…`，Issue #19；本地路径模型不受影响）

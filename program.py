@@ -104,7 +104,6 @@ def parser_constants(cfg):
         "project": common["project"],
         "container": common["container"],
         "model_lib": common["model_lib"],
-        "model_links": common["model_links"],
         "default_model": common["default_model"],
         "image": common["vllm_image"],
         "image_tar": common.get("image_tar", ""),
@@ -366,6 +365,11 @@ def gen_env(cfg, model_dir, template=None):
     """
     common, head, worker = cfg["common"], cfg["head"], cfg["worker"]
     short = os.path.basename(model_dir.rstrip("/"))
+    model_root = os.path.abspath(common["model_lib"])
+    model_relative = os.path.relpath(os.path.abspath(model_dir), model_root)
+    if model_relative == ".." or model_relative.startswith(".." + os.sep):
+        logtask("gen-env", f"模型路径必须位于 model_lib 下: {model_dir}", level=LogLevel.ERROR)
+    container_model = "/models/%s" % model_relative.replace(os.sep, "/")
     model_variant = str(common.get("model_variant", "official")).strip().lower()
     if model_variant not in {"official", "abliterated"}:
         logtask("gen-env", f"common.model_variant 必须是 official 或 abliterated，实际为: {model_variant}", level=LogLevel.ERROR)
@@ -394,11 +398,11 @@ def gen_env(cfg, model_dir, template=None):
         # ---- 模型缓存 ----
         "HF_CACHE": common["model_lib"],
         "DSPARK_MODEL_ID": model_dir,
-        "DSPARK_MODEL_OFFICIAL": "/cache/huggingface/models/%s" % short,
-        "DSPARK_MODEL_ABLITERATED": "/cache/huggingface/models/%s" % short,
+        "DSPARK_MODEL_OFFICIAL": container_model,
+        "DSPARK_MODEL_ABLITERATED": container_model,
         "DSPARK_REVISION_ABLITERATED": "",
         "ABLITERATED": "1" if abliterated else "0",
-        "DSPARK_ENCODING_FILE": "/cache/huggingface/models/%s/encoding/encoding_dsv4.py" % short,
+        "DSPARK_ENCODING_FILE": "%s/encoding/encoding_dsv4.py" % container_model,
         "SERVED_MODEL_NAME": served,
         "VLLM_HOST_IP": head["fabric_ip"],
         "WORKER_VLLM_HOST_IP": worker["fabric_ip"],
@@ -638,38 +642,6 @@ def installed_model_name(consts):
     return os.path.basename(consts["default_model"].rstrip("/")).lower()
 
 
-def link_model(consts, model_dir):
-    """双机注册模型 symlink：model_links/<short> -> 宿主 <model_lib>/<org>/<model>。
-
-    容器内 /cache/huggingface/models/<short> 按单层 short 引用（对应 main 分支
-    .env.dspark 模板 DSPARK_MODEL_OFFICIAL 约定），宿主侧以 model_links/<short> 单层
-    symlink 指向真实的 <org>/<model> 模型目录（如 /opt/models/deepseek-ai/DeepSeek-V4-Flash-0731）。
-    """
-    short = os.path.basename(model_dir.rstrip("/"))
-    dst = f"{consts['model_links']}/{short}"
-    # Compose 将整个 model_lib 挂载到 /cache/huggingface；绝对宿主 symlink
-    # 目标会在容器内仍指向 /opt/models，成为断链，必须使用相对目标。
-    symlink_target = os.path.relpath(model_dir, os.path.dirname(dst))
-    logtask("link_model", f"注册模型 {model_dir} -> {dst}（双机）")
-    if not os.path.isfile(f"{model_dir}/config.json"):
-        logtask(f"{model_dir}/config.json 不存在（检查模型目录）", level=LogLevel.ERROR)
-    if not os.path.isfile(f"{model_dir}/encoding/encoding_dsv4.py"):
-        logtask("link_model", f"{model_dir}/encoding/encoding_dsv4.py 不存在（变体若无 DSpark 编码将无法加载）", level=LogLevel.WARN)
-    logtask("link_model", f"head {socket.gethostname()}: {dst} -> {model_dir}")
-    if os.path.lexists(dst) and not os.path.islink(dst):
-        logtask(f"{dst} 已存在且不是 symlink，请人工确认", level=LogLevel.ERROR)
-    dotask("sudo mkdir -p", [consts["model_links"]], check=True)
-    dotask("sudo ln -sfn", [symlink_target, dst], check=True)
-    logtask("link_model", f"worker {consts['worker_ssh']}: {dst} -> {model_dir}")
-    ssh_task(consts["worker_ssh"],
-            f"set -e; "
-            f"if [ ! -f {shlex.quote(model_dir)}/config.json ]; then echo '  [FAIL] config.json 不存在' >&2; exit 1; fi; "
-            f"if [ -e {shlex.quote(dst)} ] && [ ! -L {shlex.quote(dst)} ]; then echo '  [FAIL] {dst} 已存在且不是 symlink' >&2; exit 1; fi; "
-            f"sudo mkdir -p {shlex.quote(consts['model_links'])} && sudo ln -sfn {shlex.quote(symlink_target)} {shlex.quote(dst)}",
-             check=True)
-    logtask("link_model", f"双机 {dst} 已指向 {model_dir}")
-
-
 def install_env(consts, cfg, model_dir):
     """安装生产 .env：gen_env 生成完整参数集 → 写 head $REPO/.env.dspark → 同步 worker。"""
     content = gen_env(cfg, model_dir)
@@ -710,7 +682,6 @@ def cmd_install(consts, cfg, args):
         logtask("install", "未检测到现存容器，直接安装")
     short = os.path.basename(model_dir.rstrip("/"))
     logtask("install", f"模型: {model_dir} (served: {short.lower()})")
-    link_model(consts, model_dir)
     install_env(consts, cfg, model_dir)
     cmd_start(consts, cfg, [])
     # 上游 start 脚本自身已等待 /v1/models 并执行最小 chat；这里不要再
@@ -721,16 +692,8 @@ def cmd_install(consts, cfg, args):
 
 
 def cmd_uninstall(consts, cfg, rest):
-    logtask("uninstall", f"清理部署：停容器、移除双机模型注册 symlink、禁用 systemd 自启；config={consts['config_local']}")
+    logtask("uninstall", f"清理部署：停容器、禁用 systemd 自启；config={consts['config_local']}")
     cmd_stop(consts, cfg, [])
-    logtask("uninstall", f"移除模型注册 {consts['model_links']}/*（双机，仅 symlink）")
-    if os.path.isdir(consts["model_links"]):
-        for name in os.listdir(consts["model_links"]):
-            link = os.path.join(consts["model_links"], name)
-            if os.path.islink(link):
-                logtask("uninstall", f"rm {link}")
-                dotask("sudo rm -f", [link])
-    ssh_task(consts["worker_ssh"], f"sudo find {shlex.quote(consts['model_links'])} -maxdepth 1 -type l -delete 2>/dev/null || true")
     logtask("uninstall", "禁用 systemd 自启")
     dotask("sudo systemctl disable --now dspark-vllm-head.service",
            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
