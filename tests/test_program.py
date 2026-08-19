@@ -103,6 +103,37 @@ class ContainerStateTests(unittest.TestCase):
         self.assertEqual(dotask.call_args.kwargs["stdout"], None)
         self.assertEqual(dotask.call_args.kwargs["stderr"], None)
 
+    @mock.patch("program.wait_for_api", return_value=True)
+    @mock.patch("program.api_healthy", return_value=False)
+    @mock.patch("program.dotask")
+    @mock.patch("program.container_running_remote", return_value=False)
+    @mock.patch("program.container_exists_local", return_value=False)
+    @mock.patch("program.os.access", return_value=True)
+    @mock.patch("program.node_role", return_value="head")
+    def test_start_treats_existing_container_exit_three_as_success_when_api_recovers(
+        self, _role, _executable, _head_exists, _worker_running, dotask, _healthy, wait_for_api
+    ):
+        dotask.side_effect = subprocess.CalledProcessError(3, ["start-script"])
+
+        self.assertEqual(program.cmd_start(self.k, {}, []), 0)
+        wait_for_api.assert_called_once_with(self.k)
+
+    @mock.patch("program.wait_for_api", return_value=False)
+    @mock.patch("program.api_healthy", return_value=False)
+    @mock.patch("program.dotask")
+    @mock.patch("program.container_running_remote", return_value=False)
+    @mock.patch("program.container_exists_local", return_value=False)
+    @mock.patch("program.os.access", return_value=True)
+    @mock.patch("program.node_role", return_value="head")
+    def test_start_fails_existing_container_exit_three_when_api_stays_down(
+        self, _role, _executable, _head_exists, _worker_running, dotask, _healthy, _wait_for_api
+    ):
+        dotask.side_effect = subprocess.CalledProcessError(3, ["start-script"])
+
+        with self.assertRaises(SystemExit) as raised:
+            program.cmd_start(self.k, {}, [])
+        self.assertEqual(raised.exception.code, 1)
+
     @mock.patch("program.api_healthy")
     @mock.patch("program.logtask")
     @mock.patch("program.os.access", return_value=False)

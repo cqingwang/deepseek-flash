@@ -460,6 +460,13 @@ def cmd_start(consts, cfg, rest):
         # 否则失败时只剩一个无上下文的 CalledProcessError 退出码。
         dotask(start_script, cwd=consts["runtime_repo"], stdout=None, stderr=None, check=True)
     except subprocess.CalledProcessError as exc:
+        if exc.returncode == 3:
+            # 上游脚本用 exit 3 表示已有容器；只有 API 二次确认健康时才把它视为成功。
+            logtask("start", "上游报告容器已存在，等待并验证现有集群 API")
+            if wait_for_api(consts):
+                logtask("start", "现有 DSpark 容器已健康，按幂等启动成功处理")
+                return 0
+            logtask("start", "已有 DSpark 容器但 API 未就绪，不能把 exit=3 当作成功", level=LogLevel.ERROR)
         logtask("start", f"上游 DSpark 启动脚本失败（exit={exc.returncode}）：{start_script}", level=LogLevel.ERROR)
     return 0
 
