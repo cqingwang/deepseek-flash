@@ -339,9 +339,14 @@ def recovery_env(consts):
     selected = (
         "WORKER_HOST", "MASTER_ADDR", "MASTER_PORT", "NCCL_IB_HCA",
         "NCCL_SOCKET_IFNAME", "NCCL_IB_GID_INDEX", "VLLM_HOST", "VLLM_PORT",
-        "VLLM_HOST_IP",
+        "VLLM_HOST_IP", "ABLITERATED", "DSPARK_REVISION", "DSPARK_ENCODING_FILE",
     )
     result = {key: values[key] for key in selected if key in values}
+    model_key = "DSPARK_MODEL_ABLITERATED" if values.get("ABLITERATED") == "1" else "DSPARK_MODEL_OFFICIAL"
+    if values.get(model_key):
+        # 直接 compose 恢复不会执行上游 start 脚本的模型选择逻辑，必须显式
+        # 传入本地容器路径，否则 Compose 默认回退到 Hugging Face repo id。
+        result["DSPARK_MODEL"] = values[model_key]
     result.setdefault("VLLM_HOST", "127.0.0.1")
     result.setdefault("VLLM_PORT", "8888")
     if result.get("MASTER_ADDR"):

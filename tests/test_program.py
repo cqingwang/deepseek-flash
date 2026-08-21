@@ -66,6 +66,17 @@ class ContainerStateTests(unittest.TestCase):
         self.assertEqual(values["VLLM_HOST"], "127.0.0.1")
         self.assertEqual(values["VLLM_HOST_IP"], "10.100.240.1")
 
+    @mock.patch("program.open", new_callable=mock.mock_open, read_data=(
+        "ABLITERATED=1\nDSPARK_MODEL_OFFICIAL=/models/official\n"
+        "DSPARK_MODEL_ABLITERATED=/models/abliterated\nDSPARK_REVISION=\n"
+        "DSPARK_ENCODING_FILE=/models/abliterated/encoding/encoding_dsv4.py\n"
+        "MASTER_ADDR=10.100.240.1\n"
+    ))
+    def test_recovery_env_selects_local_abliterated_model(self, _open):
+        values = program.recovery_env(self.k)
+        self.assertEqual(values["DSPARK_MODEL"], "/models/abliterated")
+        self.assertEqual(values["DSPARK_ENCODING_FILE"], "/models/abliterated/encoding/encoding_dsv4.py")
+
     @mock.patch("program.compose_up")
     @mock.patch("program.os.path.isfile", return_value=True)
     @mock.patch("program.container_running_local", return_value=False)
