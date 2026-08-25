@@ -682,8 +682,11 @@ def install_env(consts, cfg, model_dir):
     logtask("install_env", "同步 .env.dspark 到 worker")
     scp_task(consts["worker_ssh"], [consts["env_file"]])
     remote_env = shlex.quote(consts["env_file"])
+    remote_user = shlex.quote(consts["user"])
     ssh_task(consts["worker_ssh"],
-             f"sudo install -m 0644 /tmp/.env.dspark {remote_env} && rm -f /tmp/.env.dspark",
+             f"sudo install -m 0644 /tmp/.env.dspark {remote_env} && "
+             f"sudo chown {remote_user}:{remote_user} {remote_env} && "
+             f"rm -f /tmp/.env.dspark",
              check=True)
 
 
