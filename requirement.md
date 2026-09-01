@@ -304,8 +304,8 @@ Compose: v5.0.2, project=deepseek-v4-flash, service=vllm-dspark
 `--headless`，其余分布式参数对齐：
 
 ```text
-model=/models/drowzeys/keys-DeepSeekV4-Flash-GA-0731-Dspark-Abliterated-32-32
-served_model=keys-deepseekv4-flash-ga-0731-dspark-abliterated-32-32
+model=/models/drowzeys/keys-DeepSeekV4Flash-Vision-EXP-ablit
+served_model=keys-DeepSeekV4Flash-Vision-EXP-ablit
 api=0.0.0.0:8888, api-key enabled
 tensor-parallel=2, pipeline-parallel=1, nnodes=2
 kv-cache-dtype=nvfp4_ds_mla, block-size=256

@@ -482,12 +482,12 @@ class ModelMountLayoutTests(unittest.TestCase):
         cfg = {**self.cfg, "common": {**self.cfg["common"], "model_variant": "abliterated"}}
         env = program.gen_env(
             cfg,
-            "/opt/models/drowzeys/keys-DeepSeekV4-Flash-GA-0731-Dspark-Abliterated-32-32",
+            "/opt/models/drowzeys/keys-DeepSeekV4Flash-Vision-EXP-ablit",
             template={},
         )
         self.assertIn("ABLITERATED=1", env)
         self.assertIn(
-            "DSPARK_MODEL_ABLITERATED=/models/drowzeys/keys-DeepSeekV4-Flash-GA-0731-Dspark-Abliterated-32-32",
+            "DSPARK_MODEL_ABLITERATED=/models/drowzeys/keys-DeepSeekV4Flash-Vision-EXP-ablit",
             env,
         )
         self.assertIn("DSPARK_REVISION_ABLITERATED=", env)
