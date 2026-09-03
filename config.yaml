@@ -18,8 +18,8 @@ common:
   project: deepseek-v4-flash        # docker compose 项目名
   container: deepseek-v4-flash-vllm-dspark-1   # 容器名（双机各自同名）
   model_lib: /opt/models            # 宿主模型库根目录（各模型按 <org>/<model> 两级路径存放）
-  default_model: /opt/models/deepseek-ai/DeepSeek-V4-Flash-Vision-Exp   # 远程双机已就位的官方模型目录
-  model_variant: official                 # gen-env 选择官方模型路径（ABLITERATED=0）
+  default_model: /opt/models/drowzeys/keys-DeepSeekV4Flash-Vision-EXP-ablit   # 远程双机已就位的官方模型目录
+  model_variant: abliterated                 # gen-env 选择官方模型路径（ABLITERATED=0）abliterated|official
   vllm_image: ghcr.io/anemll/dspark-vllm-gx10:0.1.1   # 运行时镜像
   image_tar: /opt/dspark-vllm-gx10_v0.1.1.tar.gz     # 离线镜像包（受限网络优先 docker load）
   api_url: http://127.0.0.1:8888/v1/models           # 健康检查端点
